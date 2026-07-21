@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const defaultCorsAllowedOrigins = ['http://localhost:3000', 'https://adultmua.netlify.app'];
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(8080),
@@ -9,7 +11,7 @@ const schema = z.object({
   FIREBASE_USERS_COLLECTION: z.string().min(1).default('users'),
   FIREBASE_REFRESH_SESSIONS_COLLECTION: z.string().min(1).default('refreshSessions'),
   FIREBASE_ACTION_CODE_URL: z.string().url().default('http://localhost:3000/auth/action'),
-  CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+  CORS_ALLOWED_ORIGINS: z.string().default(defaultCorsAllowedOrigins.join(',')),
   ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(60),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(14),
   LOG_LEVEL: z.string().default('info'),
@@ -24,9 +26,12 @@ export function loadEnv(input = process.env): Env {
   const parsed = schema.parse(input);
   return {
     ...parsed,
-    corsOrigins: parsed.CORS_ALLOWED_ORIGINS.split(',')
-      .map((x) => x.trim())
-      .filter(Boolean),
+    corsOrigins: Array.from(
+      new Set([
+        ...defaultCorsAllowedOrigins,
+        ...parsed.CORS_ALLOWED_ORIGINS.split(',').map((x) => x.trim()),
+      ]),
+    ).filter(Boolean),
   };
 }
 
