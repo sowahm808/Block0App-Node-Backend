@@ -109,6 +109,20 @@ describe('MindUnlocking API', () => {
     sessions = new MemSessions();
     svc = new AuthService(firebase() as any, users as any, sessions as any, env);
   });
+
+  it('always allows the production Netlify frontend origin', () => {
+    const defaultEnv = loadEnv({
+      NODE_ENV: 'production',
+      ACCESS_TOKEN_SECRET: 'test-secret-test-secret-test-secret-32',
+      CORS_ALLOWED_ORIGINS: 'https://custom.example.com',
+    } as any);
+
+    expect(defaultEnv.corsOrigins).toEqual([
+      'http://localhost:3000',
+      'https://adultmua.netlify.app',
+      'https://custom.example.com',
+    ]);
+  });
   it('validates register body and returns Problem Details', async () => {
     const app = await buildApp({
       authService: svc,
