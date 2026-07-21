@@ -24,6 +24,11 @@ export class ConflictError extends AppError {
     super(409, 'Conflict', message, 'conflict');
   }
 }
+export class NotFoundError extends AppError {
+  constructor(message = 'Not Found') {
+    super(404, 'Not Found', message, 'not_found');
+  }
+}
 export class ValidationAppError extends AppError {
   constructor(errors: unknown) {
     super(400, 'Validation Failed', 'Request validation failed', 'validation_failed', errors);
