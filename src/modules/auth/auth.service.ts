@@ -64,14 +64,28 @@ export class AuthService {
         permissions,
       });
       await this.auth.setCustomUserClaims(uid, this.claims(permissions, false));
-      const emailVerificationLink = await this.auth.generateEmailVerificationLink(email, {
-        url: this.env.FIREBASE_ACTION_CODE_URL,
-      });
+      const emailVerificationLink = await this.safeGenerateEmailVerificationLink(email);
       return { userId: uid, email, emailVerificationLink };
     } catch (e: any) {
       if (uid) await this.auth.deleteUser(uid).catch(() => undefined);
       if (e?.code === 'auth/email-already-exists')
         throw new ConflictError('Email is already registered.');
+      throw e;
+    }
+  }
+  private async safeGenerateEmailVerificationLink(email: string) {
+    try {
+      return await this.auth.generateEmailVerificationLink(email, {
+        url: this.env.FIREBASE_ACTION_CODE_URL,
+      });
+    } catch (e: any) {
+      if (
+        e?.code === 'auth/invalid-continue-uri' ||
+        e?.code === 'auth/unauthorized-continue-uri' ||
+        e?.code === 'auth/invalid-dynamic-link-domain'
+      ) {
+        return null;
+      }
       throw e;
     }
   }

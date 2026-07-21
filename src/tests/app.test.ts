@@ -145,6 +145,31 @@ describe('MindUnlocking API', () => {
       svc.register({ email: 'dupe@example.com', password: 'password123', displayName: 'Dupe' }),
     ).rejects.toThrow('registered');
   });
+
+  it('does not fail registration when Firebase action links are misconfigured', async () => {
+    const auth = firebase() as any;
+    auth.generateEmailVerificationLink = async () => {
+      const e: any = new Error('continue URL is not authorized');
+      e.code = 'auth/unauthorized-continue-uri';
+      throw e;
+    };
+    const service = new AuthService(auth, users as any, sessions as any, env);
+
+    await expect(
+      service.register({
+        email: 'action-link@example.com',
+        password: 'password123',
+        displayName: 'Action Link',
+      }),
+    ).resolves.toMatchObject({
+      email: 'action-link@example.com',
+      emailVerificationLink: null,
+    });
+    expect(await users.get('uid-action-link@example.com')).toMatchObject({
+      email: 'action-link@example.com',
+    });
+  });
+
   it('rolls back Firebase user when profile setup fails', async () => {
     users.fail = true;
     await expect(
