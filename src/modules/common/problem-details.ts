@@ -5,13 +5,28 @@ import { AppError, ValidationAppError } from './errors.js';
 export function problemDetails(error: Error, request: FastifyRequest) {
   const e = error instanceof ZodError ? new ValidationAppError(error.flatten()) : error;
   const app = e instanceof AppError ? e : undefined;
+  const fastifyStatus =
+    'statusCode' in e && typeof e.statusCode === 'number' ? e.statusCode : undefined;
+  const validationErrors = 'validation' in e ? e.validation : undefined;
+  const status = app?.status ?? fastifyStatus ?? 500;
+  const isValidation = Boolean(validationErrors);
+  const title =
+    app?.title ??
+    (isValidation
+      ? 'Validation Failed'
+      : status === 429
+        ? 'Too Many Requests'
+        : 'Internal Server Error');
   return {
-    type: `https://httpstatuses.com/${app?.status ?? 500}`,
-    title: app?.title ?? 'Internal Server Error',
-    status: app?.status ?? 500,
-    detail: app?.message ?? 'An unexpected error occurred.',
+    type: `https://httpstatuses.com/${status}`,
+    title,
+    status,
+    detail:
+      app?.message ??
+      (isValidation ? 'Request validation failed' : (e.message ?? 'An unexpected error occurred.')),
     traceId: request.id,
     ...(app?.errors ? { errors: app.errors } : {}),
+    ...(validationErrors ? { errors: validationErrors } : {}),
   };
 }
 export async function errorHandler(

@@ -6,7 +6,7 @@ Production-oriented Node.js/TypeScript rebuild of the Block Zero backend foundat
 
 - Node.js 22 LTS, TypeScript, Fastify
 - Firebase Admin SDK with Firebase Authentication
-- Cloud Firestore repositories for users, refresh sessions, and outbox-ready storage
+- Cloud Firestore repositories for users, refresh sessions, learning sample data, and outbox-ready storage
 - Zod validation, Pino logs, Problem Details errors, rate limiting, secure headers, OpenAPI docs
 - Vitest tests and a production Dockerfile
 
@@ -35,5 +35,7 @@ Clients sign in with the Firebase Client SDK, then submit the Firebase ID token 
 ## Migration notes from .NET 8
 
 This implementation preserves the .NET foundation concepts: modular API/Application/Infrastructure boundaries are represented as Fastify routes, framework-independent services, and Firestore repositories; ProblemDetails-style responses and health endpoints are retained; Firebase-backed users, permission authorization, rate limiting, secure headers, OpenAPI documentation, and an outbox-worker foundation are included. Future learning-domain modules should follow the same `modules/<domain>` route/service/repository split.
+
+The application seeds the learning collections (`challenges`, `challengeDays`, `resources`, and `readinessPrompts`) on startup so the frontend can call `/api/v1/challenges` immediately after deployment.
 
 See [API.md](./API.md) for route contracts.

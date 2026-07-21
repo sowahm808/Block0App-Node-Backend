@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../app.js';
 import { AuthService } from '../modules/auth/auth.service.js';
-import { AuthRepository } from '../modules/auth/auth.repository.js';
 import { UsersRepository } from '../modules/users/users.repository.js';
 import { loadEnv } from '../config/env.js';
 
@@ -220,6 +219,25 @@ describe('MindUnlocking API', () => {
     await sessions.create('u', 14);
     expect(await sessions.revokeActiveForUser('u', 'logout')).toBe(1);
   });
+
+  it('serves seeded challenges for the frontend', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const r = await app.inject('/api/v1/challenges');
+    expect(r.statusCode).toBe(200);
+    expect(r.json().data[0]).toMatchObject({
+      slug: 'block-zero-21-day-medical-exam-prep',
+      durationDays: 21,
+      status: 'published',
+    });
+  });
+
   it('/auth/me requires authentication', async () => {
     const app = await buildApp({
       authService: svc,
