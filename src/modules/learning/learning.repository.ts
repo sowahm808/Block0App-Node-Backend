@@ -3,8 +3,12 @@ import {
   learningSeedCollections,
   sampleChallengeDays,
   sampleChallenges,
+  sampleDashboard,
+  sampleLearningPacks,
+  sampleReadiness,
   sampleReadinessPrompts,
   sampleResources,
+  sampleTeams,
 } from './learning.seed.js';
 
 export class LearningRepository {
@@ -66,6 +70,28 @@ export class LearningRepository {
     const snapshot = await this.db.collection('resources').get();
     const resources = snapshot.docs.map((doc) => doc.data());
     return resources.length ? resources : sampleResources;
+  }
+
+  async listTeams() {
+    const snapshot = await this.db.collection('teams').get();
+    const teams = snapshot.docs.map((doc) => doc.data());
+    return teams.length ? teams : sampleTeams;
+  }
+
+  async listLearningPacks() {
+    const snapshot = await this.db.collection('learningPacks').get();
+    const learningPacks = snapshot.docs.map((doc) => doc.data());
+    return learningPacks.length ? learningPacks : sampleLearningPacks;
+  }
+
+  async getDashboard() {
+    const snapshot = await this.db.collection('dashboard').limit(1).get();
+    return snapshot.empty ? sampleDashboard : snapshot.docs[0].data();
+  }
+
+  async getReadiness() {
+    const snapshot = await this.db.collection('readiness').limit(1).get();
+    return snapshot.empty ? sampleReadiness : snapshot.docs[0].data();
   }
 
   async listReadinessPrompts() {

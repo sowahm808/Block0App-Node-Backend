@@ -69,6 +69,13 @@ export async function buildApp(overrides?: any) {
             ),
           listResources: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleResources,
+          listTeams: async () => (await import('./modules/learning/learning.seed.js')).sampleTeams,
+          listLearningPacks: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleLearningPacks,
+          getDashboard: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleDashboard,
+          getReadiness: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleReadiness,
           listReadinessPrompts: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleReadinessPrompts,
         }
@@ -85,6 +92,9 @@ export async function buildApp(overrides?: any) {
       readiness: '/health/ready',
       auth: '/api/v1/auth',
       challenges: '/api/v1/challenges',
+      teams: '/api/v1/teams',
+      learningPacks: '/api/v1/learning-packs',
+      dashboard: '/api/v1/dashboard',
     },
   };
   app.get('/api/v1', async () => meta);

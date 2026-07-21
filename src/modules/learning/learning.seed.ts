@@ -69,6 +69,53 @@ export const sampleResources = [
   },
 ];
 
+export const sampleTeams = [
+  {
+    id: 'foundations-cohort',
+    name: 'Foundations Cohort',
+    description: 'Default study team for learners starting the Block Zero challenge.',
+    memberCount: 12,
+    challengeId: 'block-zero-21-day-medical-exam-prep',
+    status: 'active',
+  },
+];
+
+export const sampleLearningPacks = [
+  {
+    id: 'medical-exam-foundations',
+    slug: 'medical-exam-foundations',
+    title: 'Medical Exam Foundations',
+    description: 'Core active-recall drills, error-log workflows, and readiness checklists.',
+    resourceIds: ['active-recall-guide', 'error-log-template', 'exam-day-readiness-checklist'],
+    challengeId: 'block-zero-21-day-medical-exam-prep',
+    status: 'published',
+  },
+];
+
+export const sampleDashboard = {
+  id: 'default-dashboard',
+  activeChallengeId: 'block-zero-21-day-medical-exam-prep',
+  activeTeamId: 'foundations-cohort',
+  activeLearningPackId: 'medical-exam-foundations',
+  currentDay: 1,
+  completedDays: 0,
+  totalDays: 21,
+  nextActions: [
+    'Start Day 1 active-recall block.',
+    'Create your first error-log entry.',
+    'Complete the daily confidence check-in.',
+  ],
+};
+
+export const sampleReadiness = {
+  id: 'default-readiness',
+  status: 'ready',
+  confidenceScore: 3,
+  energyScore: 3,
+  recommendedAction: "Complete today's readiness prompt before starting your study block.",
+  promptIds: ['daily-confidence', 'daily-energy', 'blocker-note'],
+};
+
 export const sampleReadinessPrompts = [
   {
     id: 'daily-confidence',
@@ -94,5 +141,9 @@ export const learningSeedCollections = {
   challenges: sampleChallenges,
   challengeDays: sampleChallengeDays,
   resources: sampleResources,
+  teams: sampleTeams,
+  learningPacks: sampleLearningPacks,
+  dashboard: [sampleDashboard],
+  readiness: [sampleReadiness],
   readinessPrompts: sampleReadinessPrompts,
 };
