@@ -25,5 +25,13 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/resources', async () => ({ data: await learning.listResources() }));
 
+  app.get('/teams', async () => ({ data: await learning.listTeams() }));
+
+  app.get('/learning-packs', async () => ({ data: await learning.listLearningPacks() }));
+
+  app.get('/dashboard', async () => ({ data: await learning.getDashboard() }));
+
+  app.get('/readiness', async () => ({ data: await learning.getReadiness() }));
+
   app.get('/readiness/prompts', async () => ({ data: await learning.listReadinessPrompts() }));
 }

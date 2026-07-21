@@ -9,6 +9,10 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`.
 - `GET /api/v1/challenges/{slugOrId}` returns one seeded challenge.
 - `GET /api/v1/challenges/{slugOrId}/days` returns the 21 seeded daily challenge plans.
 - `GET /api/v1/resources` returns seeded learning resources.
+- `GET /api/v1/teams` returns seeded study teams.
+- `GET /api/v1/learning-packs` returns seeded learning packs.
+- `GET /api/v1/dashboard` returns a seeded dashboard summary.
+- `GET /api/v1/readiness` returns a seeded readiness summary.
 - `GET /api/v1/readiness/prompts` returns seeded daily readiness prompts.
 - `POST /api/v1/auth/register` creates a Firebase Authentication user, a Firestore `/users/{uid}` profile, default `scholar:access` permission claims, and an email verification link.
 - `POST /api/v1/auth/verify-email` verifies a Firebase ID token and synchronizes `emailVerified`.

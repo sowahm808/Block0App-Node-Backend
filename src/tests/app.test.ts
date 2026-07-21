@@ -220,7 +220,7 @@ describe('MindUnlocking API', () => {
     expect(await sessions.revokeActiveForUser('u', 'logout')).toBe(1);
   });
 
-  it('serves seeded challenges for the frontend', async () => {
+  it('serves seeded frontend learning endpoints', async () => {
     const app = await buildApp({
       authService: svc,
       sessions,
@@ -229,13 +229,20 @@ describe('MindUnlocking API', () => {
         current: (u: string) => ({ userId: u }),
       },
     });
-    const r = await app.inject('/api/v1/challenges');
-    expect(r.statusCode).toBe(200);
-    expect(r.json().data[0]).toMatchObject({
+
+    const challenges = await app.inject('/api/v1/challenges');
+    expect(challenges.statusCode).toBe(200);
+    expect(challenges.json().data[0]).toMatchObject({
       slug: 'block-zero-21-day-medical-exam-prep',
       durationDays: 21,
       status: 'published',
     });
+
+    for (const path of ['/teams', '/learning-packs', '/dashboard', '/readiness']) {
+      const response = await app.inject(`/api/v1${path}`);
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data).toBeTruthy();
+    }
   });
 
   it('/auth/me requires authentication', async () => {
