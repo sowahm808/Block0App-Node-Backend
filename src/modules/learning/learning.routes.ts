@@ -1,11 +1,26 @@
 import type { FastifyInstance } from 'fastify';
-import { NotFoundError } from '../common/errors.js';
+import { NotFoundError, ForbiddenError } from '../common/errors.js';
+import { authenticate } from '../common/auth-middleware.js';
+import type { AuthService } from '../auth/auth.service.js';
 import type { LearningRepository } from './learning.repository.js';
 
-type LearningRoutesOptions = { learning: LearningRepository };
+type LearningRoutesOptions = { learning: LearningRepository; authService?: AuthService };
 
 export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesOptions) {
-  const { learning } = opts;
+  const { learning, authService } = opts;
+  const requireAdminOrReviewer = async (request: any) => {
+    if (!authService) throw new ForbiddenError('Authentication is not configured');
+    await authenticate(authService)(request);
+    const permissions = request.user?.permissions ?? [];
+    const role = request.user?.role;
+    if (
+      ![role, ...permissions].some((value) =>
+        ['admin', 'content-review', 'admin:content', 'content:review'].includes(value),
+      )
+    ) {
+      throw new ForbiddenError('Administrator or content-review access is required');
+    }
+  };
 
   app.get('/challenges', async () => ({ data: await learning.listChallenges() }));
 
@@ -34,4 +49,36 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   app.get('/readiness', async () => ({ data: await learning.getReadiness() }));
 
   app.get('/readiness/prompts', async () => ({ data: await learning.listReadinessPrompts() }));
+
+  app.get('/capsule-attempts/:capsuleAttemptId/resume', async (request) => {
+    const { capsuleAttemptId } = request.params as { capsuleAttemptId: string };
+    const resume = await learning.resumeCapsuleAttempt(capsuleAttemptId);
+    if (!resume) throw new NotFoundError('Capsule attempt not found');
+    return { data: resume };
+  });
+
+  app.post(
+    '/capsule-attempts/:capsuleAttemptId/question-attempts/:questionAttemptId/submit',
+    async (request) => {
+      const { capsuleAttemptId, questionAttemptId } = request.params as {
+        capsuleAttemptId: string;
+        questionAttemptId: string;
+      };
+      const result = await learning.submitQuestionAttempt(
+        capsuleAttemptId,
+        questionAttemptId,
+        request.body as any,
+      );
+      if (!result) throw new NotFoundError('Question attempt not found');
+      return { data: result };
+    },
+  );
+
+  app.post(
+    '/admin/content/import-learning-pack',
+    { preHandler: requireAdminOrReviewer },
+    async (request) => ({
+      data: await learning.importLearningPack(request.body as any, request.user?.uid ?? 'unknown'),
+    }),
+  );
 }
