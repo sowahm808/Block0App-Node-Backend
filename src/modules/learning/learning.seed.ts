@@ -83,12 +83,125 @@ export const sampleTeams = [
 export const sampleLearningPacks = [
   {
     id: 'medical-exam-foundations',
+    externalId: 'bp-day-01-foundations',
     slug: 'medical-exam-foundations',
     title: 'Medical Exam Foundations',
     description: 'Core active-recall drills, error-log workflows, and readiness checklists.',
     resourceIds: ['active-recall-guide', 'error-log-template', 'exam-day-readiness-checklist'],
     challengeId: 'block-zero-21-day-medical-exam-prep',
+    dayNumber: 1,
+    audience: 'Scholar',
     status: 'published',
+    publishAtUtc: '2026-01-01T00:00:00.000Z',
+    createdBy: 'seed',
+    reviewedBy: 'seed-reviewer',
+  },
+];
+
+export const sampleCapsules = [
+  {
+    id: 'bp-day-01-capsule-01',
+    externalId: 'bp-day-01-capsule-01',
+    learningPackId: 'medical-exam-foundations',
+    title: 'High-yield diagnostic reasoning',
+    summary: 'Practice identifying the key finding before choosing an answer.',
+    sequence: 1,
+    estimatedMinutes: 12,
+    dailyTarget: true,
+    status: 'published',
+  },
+];
+
+export const sampleQuestions = [
+  {
+    id: 'bp-day-01-q001',
+    externalId: 'bp-day-01-q001',
+    capsuleId: 'bp-day-01-capsule-01',
+    sequence: 1,
+    stem: 'A learner misses several renal physiology questions after focusing on isolated facts. What should they identify first when reviewing each stem?',
+    choices: [
+      { id: 'A', label: 'A', text: 'The key finding that changes the diagnosis or mechanism.' },
+      { id: 'B', label: 'B', text: 'The longest answer choice before reading the vignette.' },
+      { id: 'C', label: 'C', text: 'The topic they studied most recently.' },
+    ],
+    figureUrl: null,
+    tableHtml: null,
+    supportingMediaUrl: null,
+    tags: ['diagnostic-reasoning', 'active-recall'],
+    difficulty: 'foundational',
+    status: 'published',
+  },
+];
+
+export const sampleQuestionExplanations = [
+  {
+    id: 'bp-day-01-q001-explanation',
+    questionId: 'bp-day-01-q001',
+    correctChoiceId: 'A',
+    correctRationale:
+      'The key finding anchors the reasoning chain and prevents answer-choice chasing.',
+    incorrectRationales: {
+      B: 'Long answer choices can be tempting but do not reliably indicate correctness.',
+      C: 'Recent study topics may bias recall and distract from the actual vignette evidence.',
+    },
+    reference: 'Block Zero internal diagnostic reasoning playbook.',
+    memory: {
+      highYieldFact: 'Name the pivot finding before looking for the best answer.',
+      pearl: 'A clear pivot finding turns recall into clinical reasoning.',
+      clinicalRelevance:
+        'Clinicians use discriminating findings to narrow differential diagnoses safely.',
+      examTrap: 'Do not choose answers because they contain familiar keywords.',
+      mnemonic: 'Pivot, Predict, Pick.',
+    },
+  },
+];
+
+export const sampleAssignments = [
+  {
+    id: 'assignment-day-01-foundations-scholar',
+    targetType: 'scholar',
+    targetId: 'seed-scholar',
+    learningPackId: 'medical-exam-foundations',
+    startUtc: '2026-01-01T00:00:00.000Z',
+    dueUtc: '2026-01-02T00:00:00.000Z',
+    required: true,
+  },
+];
+
+export const sampleCapsuleAttempts = [
+  {
+    id: 'attempt-day-01-capsule-01-seed-scholar',
+    scholarId: 'seed-scholar',
+    capsuleId: 'bp-day-01-capsule-01',
+    startedAtUtc: '2026-01-01T00:00:00.000Z',
+    completedAtUtc: null,
+    completedQuestions: 0,
+    currentQuestionAttemptId: 'question-attempt-day-01-q001-seed-scholar',
+  },
+];
+
+export const sampleQuestionAttempts = [
+  {
+    id: 'question-attempt-day-01-q001-seed-scholar',
+    capsuleAttemptId: 'attempt-day-01-capsule-01-seed-scholar',
+    questionId: 'bp-day-01-q001',
+    choiceId: null,
+    elapsedMs: null,
+    markedForReview: false,
+    submittedAtUtc: null,
+    correct: null,
+  },
+];
+
+export const sampleContentReviews = [
+  {
+    id: 'review-medical-exam-foundations',
+    entityType: 'learningPack',
+    entityId: 'medical-exam-foundations',
+    status: 'approved',
+    reviewerId: 'seed-reviewer',
+    notes: 'Seed content approved for smoke testing.',
+    reviewedAtUtc: '2026-01-01T00:00:00.000Z',
   },
 ];
 
@@ -100,6 +213,11 @@ export const sampleDashboard = {
   currentDay: 1,
   completedDays: 0,
   totalDays: 21,
+  questionsCompletedToday: 0,
+  overallCompletion: 0,
+  readinessLevel: 'ready',
+  continueUrl: '/capsules/attempt-day-01-capsule-01-seed-scholar',
+  assignedLearningPacks: sampleLearningPacks,
   nextActions: [
     'Start Day 1 active-recall block.',
     'Create your first error-log entry.',
@@ -143,6 +261,13 @@ export const learningSeedCollections = {
   resources: sampleResources,
   teams: sampleTeams,
   learningPacks: sampleLearningPacks,
+  capsules: sampleCapsules,
+  questions: sampleQuestions,
+  questionExplanations: sampleQuestionExplanations,
+  assignments: sampleAssignments,
+  capsuleAttempts: sampleCapsuleAttempts,
+  questionAttempts: sampleQuestionAttempts,
+  contentReviews: sampleContentReviews,
   dashboard: [sampleDashboard],
   readiness: [sampleReadiness],
   readinessPrompts: sampleReadinessPrompts,

@@ -78,6 +78,73 @@ export async function buildApp(overrides?: any) {
             (await import('./modules/learning/learning.seed.js')).sampleReadiness,
           listReadinessPrompts: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleReadinessPrompts,
+          resumeCapsuleAttempt: async (capsuleAttemptId: string) => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const attempt = seed.sampleCapsuleAttempts.find((item) => item.id === capsuleAttemptId);
+            const capsule = seed.sampleCapsules.find((item) => item.id === attempt?.capsuleId);
+            const questionAttempt = seed.sampleQuestionAttempts.find(
+              (item) => item.id === attempt?.currentQuestionAttemptId,
+            );
+            const question = seed.sampleQuestions.find(
+              (item) => item.id === questionAttempt?.questionId,
+            );
+            return attempt && capsule && questionAttempt && question
+              ? {
+                  capsuleAttemptId,
+                  capsule: { id: capsule.id, title: capsule.title, summary: capsule.summary },
+                  progress: { completedQuestions: attempt.completedQuestions, totalQuestions: 1 },
+                  questionAttemptId: questionAttempt.id,
+                  markedForReview: questionAttempt.markedForReview,
+                  question,
+                }
+              : null;
+          },
+          submitQuestionAttempt: async (
+            capsuleAttemptId: string,
+            questionAttemptId: string,
+            body: any,
+          ) => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const questionAttempt = seed.sampleQuestionAttempts.find(
+              (item) => item.id === questionAttemptId && item.capsuleAttemptId === capsuleAttemptId,
+            );
+            const explanation = seed.sampleQuestionExplanations.find(
+              (item) => item.questionId === questionAttempt?.questionId,
+            );
+            return explanation
+              ? {
+                  questionAttemptId,
+                  capsuleAttemptId,
+                  choiceId: body.choiceId,
+                  correct: explanation.correctChoiceId === body.choiceId,
+                  correctChoiceId: explanation.correctChoiceId,
+                  correctRationale: explanation.correctRationale,
+                  incorrectRationales: explanation.incorrectRationales,
+                  reference: explanation.reference,
+                  memory: explanation.memory,
+                }
+              : null;
+          },
+          importLearningPack: async (payload: any, importedBy: string) => {
+            const { validateLearningPackImport, importFailedSummary } =
+              await import('./modules/learning/content-import.js');
+            const errors = validateLearningPackImport(payload);
+            return errors.length
+              ? importFailedSummary(payload, importedBy, errors)
+              : {
+                  created: 4,
+                  updated: 0,
+                  skipped: 0,
+                  failed: 0,
+                  errors: [],
+                  contentIds: [payload.learningPack.externalId],
+                  audit: {
+                    importedBy,
+                    importedAtUtc: new Date().toISOString(),
+                    sourceFileName: payload.sourceFileName ?? null,
+                  },
+                };
+          },
         }
       : new LearningRepository(getFirebase().db));
   if (overrides?.seedLearning !== false && typeof learning.seedAll === 'function') {
@@ -105,7 +172,7 @@ export async function buildApp(overrides?: any) {
     async (v1) => {
       await v1.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
-      await v1.register(learningRoutes, { learning } as any);
+      await v1.register(learningRoutes, { learning, authService } as any);
     },
     { prefix: '/api/v1' },
   );
@@ -113,7 +180,7 @@ export async function buildApp(overrides?: any) {
     async (api) => {
       await api.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
-      await api.register(learningRoutes, { learning } as any);
+      await api.register(learningRoutes, { learning, authService } as any);
     },
     { prefix: '/api' },
   );

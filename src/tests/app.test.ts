@@ -245,6 +245,104 @@ describe('MindUnlocking API', () => {
     }
   });
 
+  it('keeps W1 resume payloads separate from W2/W3 submit feedback', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+
+    const resume = await app.inject(
+      '/api/v1/capsule-attempts/attempt-day-01-capsule-01-seed-scholar/resume',
+    );
+    expect(resume.statusCode).toBe(200);
+    expect(resume.json().data.question).toMatchObject({
+      id: 'bp-day-01-q001',
+      stem: expect.any(String),
+      choices: expect.any(Array),
+    });
+    expect(JSON.stringify(resume.json().data.question)).not.toContain('correctChoiceId');
+    expect(JSON.stringify(resume.json().data.question)).not.toContain('correctRationale');
+    expect(JSON.stringify(resume.json().data.question)).not.toContain('incorrectRationales');
+
+    const submit = await app.inject({
+      method: 'POST',
+      url: '/api/v1/capsule-attempts/attempt-day-01-capsule-01-seed-scholar/question-attempts/question-attempt-day-01-q001-seed-scholar/submit',
+      payload: { choiceId: 'A', elapsedMs: 1200 },
+    });
+    expect(submit.statusCode).toBe(200);
+    expect(submit.json().data).toMatchObject({
+      correct: true,
+      correctChoiceId: 'A',
+      correctRationale: expect.any(String),
+      incorrectRationales: expect.any(Object),
+      reference: expect.any(String),
+      memory: expect.any(Object),
+    });
+  });
+
+  it('requires admin or content-review access for learning-pack imports and audits results', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const payload = {
+      sourceFileName: 'day-02.json',
+      learningPack: { externalId: 'bp-day-02', title: 'Day 2', status: 'draft' },
+      capsules: [
+        {
+          externalId: 'bp-day-02-c1',
+          title: 'Capsule',
+          sequence: 1,
+          questions: [
+            {
+              externalId: 'bp-day-02-q1',
+              sequence: 1,
+              stem: 'Stem?',
+              choices: [
+                { id: 'A', label: 'A', text: 'A' },
+                { id: 'B', label: 'B', text: 'B' },
+              ],
+              explanation: {
+                correctChoiceId: 'A',
+                correctRationale: 'Because A.',
+                incorrectRationales: { B: 'Not B.' },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const scholarToken = await svc.signAccessToken('scholar', 's@example.com', ['scholar:access']);
+    const forbidden = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/content/import-learning-pack',
+      headers: { authorization: `Bearer ${scholarToken.token}` },
+      payload,
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const adminToken = await svc.signAccessToken('admin-user', 'a@example.com', ['admin:content']);
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/content/import-learning-pack',
+      headers: { authorization: `Bearer ${adminToken.token}` },
+      payload,
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().data).toMatchObject({
+      failed: 0,
+      audit: { importedBy: 'admin-user', sourceFileName: 'day-02.json' },
+    });
+  });
+
   it('/auth/me requires authentication', async () => {
     const app = await buildApp({
       authService: svc,
