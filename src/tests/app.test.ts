@@ -275,7 +275,13 @@ describe('MindUnlocking API', () => {
       day: { challengeId: 'block-zero-21-day-medical-exam-prep', day: 1 },
     });
 
-    for (const path of ['/teams', '/learning-packs', '/dashboard', '/readiness']) {
+    for (const path of [
+      '/teams',
+      '/learning-packs',
+      '/dashboard',
+      '/mentor/dashboard',
+      '/readiness',
+    ]) {
       const response = await app.inject(`/api/v1${path}`);
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
