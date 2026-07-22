@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { buildApp } from '../app.js';
 import { AuthService } from '../modules/auth/auth.service.js';
 import { UsersRepository } from '../modules/users/users.repository.js';
+import { LearningRepository } from '../modules/learning/learning.repository.js';
 import { loadEnv } from '../config/env.js';
 
 class MemUsers {
@@ -610,6 +611,40 @@ describe('MindUnlocking API', () => {
       headers: { authorization: `Bearer ${access.token}` },
     });
     expect(r.statusCode).toBe(403);
+  });
+
+  it('loads challenge days without requiring a Firestore composite index', async () => {
+    let orderByCalled = false;
+    const docs = [
+      { data: () => ({ id: 'day-03', challengeId: 'challenge-a', day: 3 }) },
+      { data: () => ({ id: 'day-01', challengeId: 'challenge-a', day: 1 }) },
+      { data: () => ({ id: 'day-02', challengeId: 'challenge-a', day: 2 }) },
+    ];
+    const query = {
+      where(field: string, operator: string, value: string) {
+        expect([field, operator, value]).toEqual(['challengeId', '==', 'challenge-a']);
+        return query;
+      },
+      orderBy() {
+        orderByCalled = true;
+        return query;
+      },
+      async get() {
+        return { docs };
+      },
+    };
+    const db = {
+      collection(name: string) {
+        expect(name).toBe('challengeDays');
+        return query;
+      },
+    };
+    const repo = new LearningRepository(db as any);
+
+    const days = await repo.getChallengeDays('challenge-a');
+
+    expect(orderByCalled).toBe(false);
+    expect(days.map((day: any) => day.day)).toEqual([1, 2, 3]);
   });
   it('maps Firestore user documents', () => {
     const repo = Object.create(UsersRepository.prototype) as UsersRepository;
