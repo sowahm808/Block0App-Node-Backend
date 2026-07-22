@@ -393,6 +393,43 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('returns the authenticated user notification settings from the collection endpoint', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-notifications', 'notifications@example.com', [
+      'scholar:access',
+    ]);
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/notifications/exam-reminders/me',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: {
+        enabled: true,
+        examName: 'NCLEX',
+        reminderTime: '07:15',
+      },
+    });
+
+    const loaded = await app.inject({
+      url: '/api/v1/notifications',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json().data.examReminder).toMatchObject({
+      userId: 'u-notifications',
+      examName: 'NCLEX',
+      reminderTime: '07:15',
+    });
+  });
+
   it('normalizes common exam reminder channel aliases from clients', async () => {
     const app = await buildApp({
       authService: svc,

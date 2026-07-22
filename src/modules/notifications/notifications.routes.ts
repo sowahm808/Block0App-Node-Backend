@@ -15,6 +15,12 @@ export async function notificationsRoutes(app: FastifyInstance, opts: Notificati
   if (!opts.authService) throw new ForbiddenError('Authentication is not configured');
   const auth = authenticate(opts.authService);
 
+  app.get('/', { preHandler: auth }, async (request) => ({
+    data: {
+      examReminder: await opts.notifications.getExamReminder(request.user!.uid),
+    },
+  }));
+
   app.post(
     '/exam-reminders/me',
     { preHandler: auth, schema: { body: zodToJsonSchema(examReminderSchema) } },
