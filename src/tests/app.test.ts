@@ -628,6 +628,19 @@ describe('MindUnlocking API', () => {
     expect(r.headers['x-content-type-options']).toBe('nosniff');
     expect(r.headers['x-frame-options']).toBe('DENY');
   });
+  it('serves versioned frontend health endpoint', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const r = await app.inject('/api/v1/health');
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ status: 'live' });
+  });
   it('rate limits auth endpoints', async () => {
     const app = await buildApp({
       authService: svc,

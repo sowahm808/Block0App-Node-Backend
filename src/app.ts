@@ -187,7 +187,8 @@ export async function buildApp(overrides?: any) {
     version: 'v1',
     status: 'available',
     links: {
-      health: '/health/live',
+      health: '/api/v1/health',
+      liveHealth: '/health/live',
       readiness: '/health/ready',
       auth: '/api/v1/auth',
       challenges: '/api/v1/challenges',
@@ -200,6 +201,8 @@ export async function buildApp(overrides?: any) {
   app.get('/api/v1', async () => meta);
   app.get('/api', async () => meta);
   app.get('/health/live', async () => ({ status: 'live' }));
+  app.get('/api/v1/health', async () => ({ status: 'live' }));
+  app.get('/api/health', async () => ({ status: 'live' }));
   app.get('/health/ready', async () => readiness.ready());
   await app.register(
     async (v1) => {
