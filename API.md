@@ -11,7 +11,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 - `GET /api/v1/resources` returns seeded learning resources.
 - `GET /api/v1/teams` returns seeded study teams.
 - `GET /api/v1/learning-packs` returns seeded learning packs. Legacy alias: `GET /learning-packs`.
-- `GET /api/v1/dashboard` returns a seeded dashboard summary.
+- `GET /api/v1/dashboard` returns a seeded dashboard summary. Compatibility aliases include `/api/v1/mentor/dashboard`, `/api/v1/review/dashboard`, and `/api/v1/admin/dashboard`.
 - `GET /api/v1/readiness` returns a seeded readiness summary.
 - `GET /api/v1/readiness/prompts` returns seeded daily readiness prompts.
 - `POST /api/v1/check-ins` saves an authenticated learner check-in with optional day, mood, energy, confidence, stress, notes, and challenge metadata.
