@@ -521,6 +521,41 @@ describe('MindUnlocking API', () => {
     expect(r.statusCode).toBe(401);
   });
 
+  it('accepts common browser token transport variants on authenticated routes', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-token-variants', 'variants@example.com', [
+      'scholar:access',
+    ]);
+
+    const authMeWithLowercaseBearer = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: { authorization: `bearer ${access.token}` },
+    });
+    const readinessWithAccessHeader = await app.inject({
+      method: 'GET',
+      url: '/api/v1/readiness/current',
+      headers: { 'x-access-token': access.token },
+    });
+    const notificationWithCookie = await app.inject({
+      method: 'GET',
+      url: '/api/v1/notifications/exam-reminders/me',
+      headers: { cookie: `accessToken=${encodeURIComponent(access.token)}` },
+    });
+
+    expect(authMeWithLowercaseBearer.statusCode).toBe(200);
+    expect(authMeWithLowercaseBearer.json()).toMatchObject({ uid: 'u-token-variants' });
+    expect(readinessWithAccessHeader.statusCode).toBe(200);
+    expect(notificationWithCookie.statusCode).toBe(200);
+  });
+
   it('saves authenticated check-ins at the canonical v1 route', async () => {
     const app = await buildApp({
       authService: svc,
