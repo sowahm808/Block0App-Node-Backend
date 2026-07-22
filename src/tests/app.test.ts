@@ -389,6 +389,33 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('normalizes common exam reminder channel aliases from clients', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-reminder-alias', 'reminder-alias@example.com', [
+      'scholar:access',
+    ]);
+
+    const saved = await app.inject({
+      method: 'POST',
+      url: '/api/v1/notifications/exam-reminders/me',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: {
+        examName: 'USMLE Step 2',
+        channels: ['app', 'in-app', 'EMAIL', 'text'],
+      },
+    });
+
+    expect(saved.statusCode).toBe(201);
+    expect(saved.json().data.channels).toEqual(['in_app', 'in_app', 'email', 'sms']);
+  });
+
   it('/auth/me requires authentication', async () => {
     const app = await buildApp({
       authService: svc,
