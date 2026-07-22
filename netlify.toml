@@ -1,0 +1,7 @@
+# Keep client-side routes working when this project is deployed on Netlify.
+# Without this fallback, direct visits such as /learning-packs are served by
+# Netlify's static file layer and return 404 before the app can render.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
