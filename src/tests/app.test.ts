@@ -522,6 +522,56 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('/profile returns the authenticated learner profile', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-profile', 'profile@example.com', [
+      'scholar:access',
+    ]);
+
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/v1/profile',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({
+      uid: 'u-profile',
+      email: 'profile@example.com',
+      permissions: ['scholar:access'],
+    });
+  });
+
+  it('/profile is available at the compatibility /api prefix', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-profile-alias', 'profile-alias@example.com', [
+      'scholar:access',
+    ]);
+
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/profile',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ uid: 'u-profile-alias' });
+  });
+
   it('/auth/me requires authentication', async () => {
     const app = await buildApp({
       authService: svc,

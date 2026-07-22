@@ -25,6 +25,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 ## Authenticated
 
 - `GET /api/v1/auth/me`
+- `GET /api/v1/profile` returns the authenticated learner profile. Compatibility alias: `GET /api/profile`.
 - `POST /api/v1/auth/logout`
 - `POST /api/v1/auth/revoke`
 - `GET /api/v1/readiness/current` requires `scholar:access`.
