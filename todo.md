@@ -1,49 +1,54 @@
-# Functionality TODO / Audit
+# MIND UNLOCKING ACADEMY Backend TODO
 
-Last audited: 2026-07-21
+## Current architecture summary
 
-## Status
+- Existing API is a Fastify + TypeScript service with Firebase Admin, Firestore repositories, Pino logging, Swagger, CORS, rate limiting, auth, learning, readiness, notifications, and worker entry points.
+- The current code is not yet NestJS; preserve working Fastify code while migrating toward the required NestJS modular monolith.
+- Existing tests cover auth flows, seeded learning endpoints, W1/W2 payload separation, content import authorization, notifications, and check-ins.
 
-All currently documented backend functionality is implemented and covered by automated checks. No incomplete documented route or service behavior was found during this audit.
+## Security and production gaps
 
-## Completed functionality checklist
+- [x] Add complete environment contract and production fail-fast validation.
+- [x] Normalize Firebase Admin private keys and initialize a single Admin app.
+- [x] Verify Firebase ID tokens in request auth path and synchronize users from trusted backend data.
+- [x] Add trusted role/permission defaults and ignore frontend-supplied roles.
+- [ ] Complete NestJS migration with Fastify adapter, guards, decorators, modules, and DI.
+- [ ] Replace legacy local JWT compatibility after Angular has fully moved to Firebase ID tokens.
+- [ ] Add App Check enforcement where practical.
+- [ ] Complete typed repository coverage for all Firestore collections.
+- [ ] Add idempotent Firestore transaction workflows for question submission, check-ins, rewards, raffles, certificates, and notifications.
+- [ ] Add emulator-backed integration and security-rule tests for every sensitive workflow.
+- [ ] Complete Render background worker/cron split with Firestore job leases.
+- [ ] Complete AI provider abstraction with approval/audit workflow.
 
-- [x] API metadata is available at `GET /api/v1` and compatibility alias `GET /api`.
-- [x] Health probes are available at `GET /health/live` and `GET /health/ready`.
-- [x] OpenAPI documentation is mounted at `GET /docs`.
-- [x] Authentication endpoints are implemented:
-  - [x] `POST /api/v1/auth/register`
-  - [x] `POST /api/v1/auth/verify-email`
-  - [x] `POST /api/v1/auth/login`
-  - [x] `POST /api/v1/auth/refresh`
-  - [x] `POST /api/v1/auth/forgot-password`
-  - [x] `POST /api/v1/auth/reset-password`
-  - [x] `GET /api/v1/auth/me`
-  - [x] `POST /api/v1/auth/logout`
-  - [x] `POST /api/v1/auth/revoke`
-- [x] Learning endpoints are implemented and backed by seeded fallback content:
-  - [x] `GET /api/v1/challenges`
-  - [x] `GET /api/v1/challenges/{slugOrId}`
-  - [x] `GET /api/v1/challenges/{slugOrId}/days`
-  - [x] `GET /api/v1/resources`
-  - [x] `GET /api/v1/teams`
-  - [x] `GET /api/v1/learning-packs`
-  - [x] `GET /api/v1/dashboard`
-  - [x] `GET /api/v1/readiness`
-  - [x] `GET /api/v1/readiness/prompts`
-- [x] Authenticated readiness endpoint `GET /api/v1/readiness/current` requires `scholar:access`.
-- [x] Compatibility aliases under `/api` are registered for auth, readiness, and learning routes.
-- [x] RFC 7807-style Problem Details responses are implemented for validation, application, rate-limit, and unexpected errors.
-- [x] CORS includes local development and the production Netlify frontend origin by default.
-- [x] Secure headers and rate limiting are registered globally, with tighter auth endpoint limits.
-- [x] Refresh sessions are hashed, rotated on use, revoked on logout/revoke, and reuse detection revokes active sessions.
-- [x] Firebase user registration rolls back Authentication users if profile setup fails.
-- [x] Firestore user mapping supplies safe defaults for MFA-related fields.
-- [x] Outbox worker foundation exists for future asynchronous processing expansion.
+## Incremental phases
 
-## Verification commands
+### Phase 1 — Platform foundation
 
-- [x] `npm test`
-- [x] `npm run typecheck`
-- [x] `npm run build`
-- [x] `npm run lint`
+- [x] Inspect repository and preserve existing working API.
+- [x] Create TODO.md with architecture summary and gaps.
+- [x] Expand environment validation with Zod and `.env.example`.
+- [x] Harden Firebase Admin initialization for production credentials and Cloud Storage config.
+- [ ] Establish NestJS `src/main.ts` and `src/app.module.ts` around existing behavior.
+- [ ] Add global exception filter, validation pipe parity, Swagger generation, and health checks in NestJS.
+
+### Phase 2 — Auth, users, authorization
+
+- [x] Update request authentication to verify Firebase ID tokens and sync user profiles.
+- [x] Add trusted roles and default permissions.
+- [x] Reject disabled/suspended/deleted app users.
+- [x] Add `/api/v1/auth/sync`.
+- [ ] Add NestJS `FirebaseAuthGuard`, `RolesGuard`, `PermissionsGuard`, decorators, and admin user-management endpoints.
+
+### Phase 3+ — Product domains
+
+- [ ] Implement full challenge/cohort/enrollment/team/learning-pack/capsule/question/attempt repositories.
+- [ ] Implement W1/W2/W3 DTOs and transaction-protected answer submission at canonical routes.
+- [ ] Implement check-ins, progress projections, readiness, scenarios, rehearsals, rewards, raffles, certificates, notifications, content review, reports, file management, audit, and AI modules.
+
+## Missing requirement documentation
+
+- Missing: full production NestJS backend and all business modules.
+- Why: this change set performs the required first actions incrementally without deleting existing working code.
+- Production risk: existing API remains partially functional but is not complete for the full 21-day challenge acceptance criteria.
+- Next step: introduce NestJS with Fastify adapter and port existing route behavior behind Nest modules before expanding domain workflows.
