@@ -617,6 +617,24 @@ describe('MindUnlocking API', () => {
     expect(r.statusCode).toBe(403);
   });
 
+  it('/readiness/current allows wildcard permissions for super administrators', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('super-admin', 'admin@example.com', ['*']);
+    const r = await app.inject({
+      url: '/api/v1/readiness/current',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ userId: 'super-admin' });
+  });
+
   it('loads challenge days without requiring a Firestore composite index', async () => {
     let orderByCalled = false;
     const docs = [
