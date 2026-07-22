@@ -262,6 +262,10 @@ describe('MindUnlocking API', () => {
     expect(scenarios.statusCode).toBe(200);
     expect(scenarios.json().data).toEqual(challenges.json().data);
 
+    const availableScenarios = await app.inject('/api/v1/scenarios/available');
+    expect(availableScenarios.statusCode).toBe(200);
+    expect(availableScenarios.json().data).toEqual(challenges.json().data);
+
     const currentToday = await app.inject('/api/v1/challenges/current/today');
     expect(currentToday.statusCode).toBe(200);
     expect(currentToday.json().data).toMatchObject({
