@@ -28,7 +28,11 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     }
   };
 
-  app.get('/challenges', async () => ({ data: await learning.listChallenges() }));
+  const listPublishedChallenges = async () => ({ data: await learning.listChallenges() });
+
+  app.get('/challenges', listPublishedChallenges);
+
+  app.get('/scenarios', listPublishedChallenges);
 
   app.post(
     '/check-ins',

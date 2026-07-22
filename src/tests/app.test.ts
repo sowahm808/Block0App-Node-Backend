@@ -238,6 +238,10 @@ describe('MindUnlocking API', () => {
       status: 'published',
     });
 
+    const scenarios = await app.inject('/api/v1/scenarios');
+    expect(scenarios.statusCode).toBe(200);
+    expect(scenarios.json().data).toEqual(challenges.json().data);
+
     for (const path of ['/teams', '/learning-packs', '/dashboard', '/readiness']) {
       const response = await app.inject(`/api/v1${path}`);
       expect(response.statusCode).toBe(200);

@@ -191,6 +191,7 @@ export async function buildApp(overrides?: any) {
       readiness: '/health/ready',
       auth: '/api/v1/auth',
       challenges: '/api/v1/challenges',
+      scenarios: '/api/v1/scenarios',
       teams: '/api/v1/teams',
       learningPacks: '/api/v1/learning-packs',
       dashboard: '/api/v1/dashboard',
