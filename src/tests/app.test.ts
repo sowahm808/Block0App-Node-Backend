@@ -280,6 +280,7 @@ describe('MindUnlocking API', () => {
       '/learning-packs',
       '/dashboard',
       '/mentor/dashboard',
+      '/review/dashboard',
       '/readiness',
     ]) {
       const response = await app.inject(`/api/v1${path}`);
