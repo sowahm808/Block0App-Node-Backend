@@ -18,12 +18,22 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   const requireAdminOrReviewer = async (request: any) => {
     await requireAuth(request);
     const permissions = request.user?.permissions ?? [];
+    const roles = request.user?.roles ?? [];
     const role = request.user?.role;
-    if (
-      ![role, ...permissions].some((value) =>
-        ['admin', 'content-review', 'admin:content', 'content:review'].includes(value),
-      )
-    ) {
+    const accessClaims = [role, ...roles, ...permissions].filter(Boolean);
+    const allowedClaims = new Set([
+      '*',
+      'admin',
+      'Administrator',
+      'SuperAdministrator',
+      'ContentReviewer',
+      'content-review',
+      'admin:content',
+      'content:review',
+      'content.manage',
+      'content.review',
+    ]);
+    if (!accessClaims.some((value) => allowedClaims.has(value))) {
       throw new ForbiddenError('Administrator or content-review access is required');
     }
   };

@@ -13,6 +13,7 @@ export interface AuthenticatedPrincipal {
   email?: string;
   permissions: string[];
   role?: string;
+  roles?: string[];
   emailVerified?: boolean;
 }
 declare module 'fastify' {
