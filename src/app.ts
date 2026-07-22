@@ -227,5 +227,6 @@ export async function buildApp(overrides?: any) {
     },
     { prefix: '/api' },
   );
+  await app.register(learningRoutes, { learning, authService } as any);
   return app;
 }

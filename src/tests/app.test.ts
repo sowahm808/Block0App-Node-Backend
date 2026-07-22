@@ -247,6 +247,12 @@ describe('MindUnlocking API', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const legacyLearningPacks = await app.inject('/learning-packs');
+    expect(legacyLearningPacks.statusCode).toBe(200);
+    expect(legacyLearningPacks.json().data).toEqual(
+      (await app.inject('/api/v1/learning-packs')).json().data,
+    );
   });
 
   it('keeps W1 resume payloads separate from W2/W3 submit feedback', async () => {

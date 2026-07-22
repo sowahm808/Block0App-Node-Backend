@@ -1,6 +1,6 @@
 # MindUnlocking API
 
-Canonical routes are under `/api/v1`; compatibility aliases are under `/api`.
+Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Public learning routes are also available without a prefix for legacy frontend builds that request paths such as `/learning-packs` from the configured API origin.
 
 ## Public
 
@@ -10,7 +10,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`.
 - `GET /api/v1/challenges/{slugOrId}/days` returns the 21 seeded daily challenge plans.
 - `GET /api/v1/resources` returns seeded learning resources.
 - `GET /api/v1/teams` returns seeded study teams.
-- `GET /api/v1/learning-packs` returns seeded learning packs.
+- `GET /api/v1/learning-packs` returns seeded learning packs. Legacy alias: `GET /learning-packs`.
 - `GET /api/v1/dashboard` returns a seeded dashboard summary.
 - `GET /api/v1/readiness` returns a seeded readiness summary.
 - `GET /api/v1/readiness/prompts` returns seeded daily readiness prompts.
