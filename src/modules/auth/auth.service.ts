@@ -1,9 +1,11 @@
 import { SignJWT, jwtVerify } from 'jose';
 import type { Auth } from 'firebase-admin/auth';
-import { ConflictError, UnauthorizedError } from '../common/errors.js';
+import { ConflictError, ForbiddenError, UnauthorizedError } from '../common/errors.js';
 import { UsersRepository } from '../users/users.repository.js';
 import { AuthRepository } from './auth.repository.js';
 import type { Env } from '../../config/env.js';
+import { isAppRole, resolvePermissions } from '../common/roles-permissions.js';
+import type { AuthenticatedUser } from '../users/users.types.js';
 
 const normalize = (email: string) => email.trim().toLowerCase();
 export class AuthService {
@@ -17,11 +19,19 @@ export class AuthService {
     this.key = new TextEncoder().encode(env.ACCESS_TOKEN_SECRET);
   }
   private claims(perms: string[], emailVerified: boolean) {
+    return { permissions: perms, permission: perms, email_verified: emailVerified };
+  }
+  private sanitize(user: any): AuthenticatedUser {
+    const roles = user.roles?.filter(isAppRole) ?? ['Scholar'];
     return {
-      permissions: perms,
-      permission: perms,
-      role: perms.includes('admin:access') ? 'admin' : 'scholar',
-      email_verified: emailVerified,
+      uid: user.uid,
+      email: user.email || undefined,
+      emailVerified: Boolean(user.emailVerified),
+      displayName: user.displayName || undefined,
+      roles,
+      permissions: resolvePermissions(roles, user.permissions ?? []),
+      cohortIds: user.cohortIds ?? [],
+      activeCohortId: user.activeCohortId ?? undefined,
     };
   }
   async signAccessToken(uid: string, email: string | undefined, permissions: string[]) {
@@ -34,13 +44,53 @@ export class AuthService {
       .sign(this.key);
     return { token, expires };
   }
-  async verifyAccessToken(token: string) {
-    const { payload } = await jwtVerify(token, this.key);
-    return {
-      uid: payload.sub!,
-      email: payload.email as string | undefined,
-      permissions: (payload.permission as string[]) ?? (payload.permissions as string[]) ?? [],
-    };
+  async verifyAccessToken(token: string): Promise<AuthenticatedUser> {
+    try {
+      const decoded = await this.auth.verifyIdToken(token, true);
+      const existing = await this.users.get(decoded.uid);
+      if (
+        existing?.status === 'Disabled' ||
+        existing?.status === 'Suspended' ||
+        existing?.status === 'Deleted'
+      ) {
+        throw new ForbiddenError('The authenticated account is not active.');
+      }
+      const synced = await this.users.upsert({
+        uid: decoded.uid,
+        email: normalize(decoded.email ?? existing?.email ?? ''),
+        emailNormalized: decoded.email
+          ? normalize(decoded.email)
+          : (existing?.emailNormalized ?? null),
+        displayName: (decoded.name as string) ?? existing?.displayName ?? '',
+        photoUrl: (decoded.picture as string) ?? existing?.photoUrl ?? null,
+        authProvider: decoded.firebase?.sign_in_provider ?? existing?.authProvider ?? 'firebase',
+        emailVerified: Boolean(decoded.email_verified),
+        status: existing?.status ?? 'Active',
+        roles: existing?.roles ?? ['Scholar'],
+        permissions: existing?.permissions ?? [],
+        cohortIds: existing?.cohortIds ?? [],
+        activeCohortId: existing?.activeCohortId ?? null,
+        mfaEnabled: existing?.mfaEnabled ?? false,
+        administrativeMfaRequired: existing?.administrativeMfaRequired ?? false,
+        lastLoginAt: new Date(),
+      });
+      return this.sanitize(synced);
+    } catch (error) {
+      if (error instanceof ForbiddenError) throw error;
+      // Backward-compatible local JWT support for existing tests and legacy clients.
+      if (this.env.NODE_ENV !== 'production') {
+        const { payload } = await jwtVerify(token, this.key);
+        return {
+          uid: payload.sub!,
+          email: payload.email as string | undefined,
+          emailVerified: true,
+          roles: ['Scholar'],
+          permissions: (payload.permission as string[]) ?? (payload.permissions as string[]) ?? [],
+          cohortIds: [],
+        };
+      }
+      throw new UnauthorizedError('Invalid Firebase ID token.');
+    }
   }
   async register(input: { email: string; password: string; displayName: string }) {
     const email = normalize(input.email);

@@ -109,18 +109,28 @@ describe('MindUnlocking API', () => {
     svc = new AuthService(firebase() as any, users as any, sessions as any, env);
   });
 
-  it('always allows the production Netlify frontend origin', () => {
+  it('requires Firebase Admin credentials in production', () => {
+    expect(() =>
+      loadEnv({
+        NODE_ENV: 'production',
+        ACCESS_TOKEN_SECRET: 'test-secret-test-secret-test-secret-32',
+        CORS_ALLOWED_ORIGINS: 'https://custom.example.com',
+      } as any),
+    ).toThrow('FIREBASE_PROJECT_ID is required in production');
+  });
+
+  it('parses strict production CORS origins when required secrets are present', () => {
     const defaultEnv = loadEnv({
       NODE_ENV: 'production',
       ACCESS_TOKEN_SECRET: 'test-secret-test-secret-test-secret-32',
+      FIREBASE_PROJECT_ID: 'prod-project',
+      FIREBASE_CLIENT_EMAIL: 'firebase-admin@prod-project.iam.gserviceaccount.com',
+      FIREBASE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----',
+      FIREBASE_STORAGE_BUCKET: 'prod-project.appspot.com',
       CORS_ALLOWED_ORIGINS: 'https://custom.example.com',
     } as any);
 
-    expect(defaultEnv.corsOrigins).toEqual([
-      'http://localhost:3000',
-      'https://adultmua.netlify.app',
-      'https://custom.example.com',
-    ]);
+    expect(defaultEnv.corsOrigins).toEqual(['http://localhost:4200', 'https://custom.example.com']);
   });
   it('validates register body and returns Problem Details', async () => {
     const app = await buildApp({

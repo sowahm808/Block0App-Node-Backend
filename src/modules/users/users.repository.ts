@@ -1,5 +1,6 @@
 import type { Firestore, Timestamp } from 'firebase-admin/firestore';
 import type { AppUser } from './users.types.js';
+import { isAppRole, resolvePermissions } from '../common/roles-permissions.js';
 
 export class UsersRepository {
   constructor(
@@ -19,10 +20,20 @@ export class UsersRepository {
   ): Promise<AppUser> {
     const now = new Date();
     const existing = await this.get(user.uid);
+    const roles = user.roles?.filter(isAppRole) ?? existing?.roles ?? ['Scholar'];
+    const explicitPermissions = user.permissions ?? existing?.permissions ?? [];
     const entity: AppUser = {
       ...user,
+      emailNormalized: user.emailNormalized ?? user.email?.toLowerCase() ?? null,
+      authProvider: user.authProvider ?? existing?.authProvider ?? 'firebase',
+      status: user.status ?? existing?.status ?? 'Active',
+      roles,
+      permissions: resolvePermissions(roles, explicitPermissions),
+      cohortIds: user.cohortIds ?? existing?.cohortIds ?? [],
+      activeCohortId: user.activeCohortId ?? existing?.activeCohortId ?? null,
       createdUtc: user.createdUtc ?? existing?.createdUtc ?? now,
       updatedUtc: now,
+      lastLoginAt: user.lastLoginAt ?? now,
     };
     await this.col().doc(user.uid).set(entity, { merge: true });
     return entity;
@@ -42,7 +53,18 @@ export class UsersRepository {
       emailVerified: Boolean(data.emailVerified),
       mfaEnabled: Boolean(data.mfaEnabled),
       administrativeMfaRequired: Boolean(data.administrativeMfaRequired),
-      permissions: data.permissions ?? [],
+      status: data.status ?? 'Active',
+      roles: Array.isArray(data.roles) ? data.roles.filter(isAppRole) : ['Scholar'],
+      permissions: resolvePermissions(
+        Array.isArray(data.roles) ? data.roles.filter(isAppRole) : ['Scholar'],
+        data.permissions ?? [],
+      ),
+      cohortIds: data.cohortIds ?? [],
+      activeCohortId: data.activeCohortId ?? null,
+      photoUrl: data.photoUrl ?? null,
+      authProvider: data.authProvider ?? 'firebase',
+      emailNormalized: data.emailNormalized ?? data.email?.toLowerCase() ?? null,
+      lastLoginAt: data.lastLoginAt ? toDate(data.lastLoginAt) : undefined,
       createdUtc: toDate(data.createdUtc),
       updatedUtc: toDate(data.updatedUtc),
     };
