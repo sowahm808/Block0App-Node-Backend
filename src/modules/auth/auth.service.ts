@@ -44,7 +44,27 @@ export class AuthService {
       .sign(this.key);
     return { token, expires };
   }
+  private async verifyBackendAccessToken(token: string): Promise<AuthenticatedUser> {
+    const { payload } = await jwtVerify(token, this.key);
+    if (!payload.sub) throw new UnauthorizedError();
+    const existing = await this.users.get(payload.sub);
+    if (existing) return this.sanitize(existing);
+    return {
+      uid: payload.sub,
+      email: payload.email as string | undefined,
+      emailVerified: Boolean(payload.email_verified ?? true),
+      roles: ['Scholar'],
+      permissions: (payload.permission as string[]) ?? (payload.permissions as string[]) ?? [],
+      cohortIds: [],
+    };
+  }
   async verifyAccessToken(token: string): Promise<AuthenticatedUser> {
+    try {
+      return await this.verifyBackendAccessToken(token);
+    } catch {
+      // Firebase ID tokens are also accepted for clients that call protected routes
+      // before exchanging their Firebase credential through /auth/login.
+    }
     try {
       const decoded = await this.auth.verifyIdToken(token, true);
       const existing = await this.users.get(decoded.uid);
@@ -77,19 +97,7 @@ export class AuthService {
       return this.sanitize(synced);
     } catch (error) {
       if (error instanceof ForbiddenError) throw error;
-      // Backward-compatible local JWT support for existing tests and legacy clients.
-      if (this.env.NODE_ENV !== 'production') {
-        const { payload } = await jwtVerify(token, this.key);
-        return {
-          uid: payload.sub!,
-          email: payload.email as string | undefined,
-          emailVerified: true,
-          roles: ['Scholar'],
-          permissions: (payload.permission as string[]) ?? (payload.permissions as string[]) ?? [],
-          cohortIds: [],
-        };
-      }
-      throw new UnauthorizedError('Invalid Firebase ID token.');
+      throw new UnauthorizedError('Invalid access token.');
     }
   }
   async register(input: { email: string; password: string; displayName: string }) {
