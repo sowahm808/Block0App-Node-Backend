@@ -343,6 +343,52 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('saves exam reminders for the authenticated user in the backend database', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-reminder', 'reminder@example.com', [
+      'scholar:access',
+    ]);
+
+    const saved = await app.inject({
+      method: 'POST',
+      url: '/api/v1/notifications/exam-reminders/me',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: {
+        enabled: true,
+        examName: 'USMLE Step 1',
+        examDate: '2026-09-01',
+        reminderTime: '08:30',
+        timezone: 'America/New_York',
+        reminderDaysBefore: [30, 7, 1],
+        channels: ['email', 'push'],
+      },
+    });
+    expect(saved.statusCode).toBe(201);
+    expect(saved.json().data).toMatchObject({
+      userId: 'u-reminder',
+      examName: 'USMLE Step 1',
+      reminderTime: '08:30',
+    });
+
+    const loaded = await app.inject({
+      url: '/api/v1/notifications/exam-reminders/me',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json().data).toMatchObject({
+      userId: 'u-reminder',
+      examDate: '2026-09-01',
+      reminderDaysBefore: [30, 7, 1],
+    });
+  });
+
   it('/auth/me requires authentication', async () => {
     const app = await buildApp({
       authService: svc,

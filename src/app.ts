@@ -17,6 +17,8 @@ import { ReadinessService } from './modules/readiness/readiness.service.js';
 import { readinessRoutes } from './modules/readiness/readiness.routes.js';
 import { LearningRepository } from './modules/learning/learning.repository.js';
 import { learningRoutes } from './modules/learning/learning.routes.js';
+import { NotificationsRepository } from './modules/notifications/notifications.repository.js';
+import { notificationsRoutes } from './modules/notifications/notifications.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -52,6 +54,29 @@ export async function buildApp(overrides?: any) {
   const authService =
     overrides?.authService ?? new AuthService(getFirebase().auth, users!, sessions, env);
   const readiness = overrides?.readiness ?? new ReadinessService(getFirebase().db);
+  const notifications =
+    overrides?.notifications ??
+    (overrides
+      ? {
+          data: new Map<string, any>(),
+          async saveExamReminder(userId: string, input: any) {
+            const now = new Date().toISOString();
+            const existing = this.data.get(userId) ?? {};
+            const reminder = {
+              ...existing,
+              ...input,
+              userId,
+              createdAtUtc: existing.createdAtUtc ?? now,
+              updatedAtUtc: now,
+            };
+            this.data.set(userId, reminder);
+            return reminder;
+          },
+          async getExamReminder(userId: string) {
+            return this.data.get(userId) ?? null;
+          },
+        }
+      : new NotificationsRepository(getFirebase().db));
   const learning =
     overrides?.learning ??
     (overrides
@@ -173,6 +198,11 @@ export async function buildApp(overrides?: any) {
       await v1.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await v1.register(learningRoutes, { learning, authService } as any);
+      await v1.register(notificationsRoutes, {
+        prefix: '/notifications',
+        notifications,
+        authService,
+      } as any);
     },
     { prefix: '/api/v1' },
   );
@@ -181,6 +211,11 @@ export async function buildApp(overrides?: any) {
       await api.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await api.register(learningRoutes, { learning, authService } as any);
+      await api.register(notificationsRoutes, {
+        prefix: '/notifications',
+        notifications,
+        authService,
+      } as any);
     },
     { prefix: '/api' },
   );
