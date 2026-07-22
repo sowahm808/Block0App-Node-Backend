@@ -2,15 +2,21 @@ import type { FastifyInstance } from 'fastify';
 import { NotFoundError, ForbiddenError } from '../common/errors.js';
 import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { LearningRepository } from './learning.repository.js';
+import { checkInSchema } from './check-ins.schemas.js';
 
 type LearningRoutesOptions = { learning: LearningRepository; authService?: AuthService };
 
 export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesOptions) {
   const { learning, authService } = opts;
-  const requireAdminOrReviewer = async (request: any) => {
+  const requireAuth = async (request: any) => {
     if (!authService) throw new ForbiddenError('Authentication is not configured');
     await authenticate(authService)(request);
+  };
+
+  const requireAdminOrReviewer = async (request: any) => {
+    await requireAuth(request);
     const permissions = request.user?.permissions ?? [];
     const role = request.user?.role;
     if (
@@ -23,6 +29,15 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   };
 
   app.get('/challenges', async () => ({ data: await learning.listChallenges() }));
+
+  app.post(
+    '/check-ins',
+    { preHandler: requireAuth, schema: { body: zodToJsonSchema(checkInSchema) } },
+    async (request, reply) => {
+      const data = await learning.saveCheckIn(request.user!.uid, checkInSchema.parse(request.body));
+      return reply.status(201).send({ data });
+    },
+  );
 
   app.get('/challenges/:slugOrId', async (request) => {
     const { slugOrId } = request.params as { slugOrId: string };
