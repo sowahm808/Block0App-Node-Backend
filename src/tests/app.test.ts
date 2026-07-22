@@ -392,6 +392,25 @@ describe('MindUnlocking API', () => {
       failed: 0,
       audit: { importedBy: 'admin-user', sourceFileName: 'day-02.json' },
     });
+
+    const reviewerToken = await svc.signAccessToken('reviewer-user', 'r@example.com', [
+      'content.review',
+    ]);
+    const reviewerImported = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/content/import-learning-pack',
+      headers: { authorization: `Bearer ${reviewerToken.token}` },
+      payload: {
+        ...payload,
+        sourceFileName: 'day-03.json',
+        learningPack: { externalId: 'bp-day-03', title: 'Day 3', status: 'draft' },
+      },
+    });
+    expect(reviewerImported.statusCode).toBe(200);
+    expect(reviewerImported.json().data).toMatchObject({
+      failed: 0,
+      audit: { importedBy: 'reviewer-user', sourceFileName: 'day-03.json' },
+    });
   });
 
   it('saves exam reminders for the authenticated user in the backend database', async () => {
