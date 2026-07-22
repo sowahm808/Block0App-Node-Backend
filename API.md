@@ -14,6 +14,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`.
 - `GET /api/v1/dashboard` returns a seeded dashboard summary.
 - `GET /api/v1/readiness` returns a seeded readiness summary.
 - `GET /api/v1/readiness/prompts` returns seeded daily readiness prompts.
+- `POST /api/v1/check-ins` saves an authenticated learner check-in with optional day, mood, energy, confidence, stress, notes, and challenge metadata.
 - `POST /api/v1/auth/register` creates a Firebase Authentication user, a Firestore `/users/{uid}` profile, default `scholar:access` permission claims, and an email verification link.
 - `POST /api/v1/auth/verify-email` verifies a Firebase ID token and synchronizes `emailVerified`.
 - `POST /api/v1/auth/login` accepts a Firebase Client SDK ID token; raw password verification is intentionally not performed by the backend.

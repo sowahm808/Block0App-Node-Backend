@@ -20,9 +20,24 @@ import {
   validateLearningPackImport,
   type LearningPackImportPayload,
 } from './content-import.js';
+import type { CheckInInput } from './check-ins.schemas.js';
 
 export class LearningRepository {
   constructor(private db: Firestore) {}
+
+  async saveCheckIn(userId: string, input: CheckInInput) {
+    const now = new Date().toISOString();
+    const ref = this.db.collection('checkIns').doc();
+    const checkIn = {
+      id: ref.id,
+      ...input,
+      userId,
+      createdAtUtc: now,
+      updatedAtUtc: now,
+    };
+    await ref.set(checkIn);
+    return checkIn;
+  }
 
   async seedAll() {
     const seeded: Record<string, number> = {};

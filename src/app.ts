@@ -103,6 +103,13 @@ export async function buildApp(overrides?: any) {
             (await import('./modules/learning/learning.seed.js')).sampleReadiness,
           listReadinessPrompts: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleReadinessPrompts,
+          saveCheckIn: async (userId: string, input: any) => ({
+            id: 'check-in-test',
+            ...input,
+            userId,
+            createdAtUtc: new Date().toISOString(),
+            updatedAtUtc: new Date().toISOString(),
+          }),
           resumeCapsuleAttempt: async (capsuleAttemptId: string) => {
             const seed = await import('./modules/learning/learning.seed.js');
             const attempt = seed.sampleCapsuleAttempts.find((item) => item.id === capsuleAttemptId);

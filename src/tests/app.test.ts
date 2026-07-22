@@ -401,6 +401,37 @@ describe('MindUnlocking API', () => {
     const r = await app.inject('/api/v1/auth/me');
     expect(r.statusCode).toBe(401);
   });
+
+  it('saves authenticated check-ins at the canonical v1 route', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-check-in', 'checkin@example.com', [
+      'scholar:access',
+    ]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/check-ins',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { dayNumber: 1, energy: 4, confidence: 3, notes: 'Ready to study' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data).toMatchObject({
+      id: 'check-in-test',
+      userId: 'u-check-in',
+      dayNumber: 1,
+      energy: 4,
+      confidence: 3,
+      notes: 'Ready to study',
+    });
+  });
+
   it('/readiness/current requires scholar access', async () => {
     const app = await buildApp({
       authService: svc,

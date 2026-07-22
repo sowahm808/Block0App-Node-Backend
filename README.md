@@ -36,6 +36,6 @@ Clients sign in with the Firebase Client SDK, then submit the Firebase ID token 
 
 This implementation preserves the .NET foundation concepts: modular API/Application/Infrastructure boundaries are represented as Fastify routes, framework-independent services, and Firestore repositories; ProblemDetails-style responses and health endpoints are retained; Firebase-backed users, permission authorization, rate limiting, secure headers, OpenAPI documentation, and an outbox-worker foundation are included. Future learning-domain modules should follow the same `modules/<domain>` route/service/repository split.
 
-The application seeds the learning collections (`challenges`, `challengeDays`, `resources`, `teams`, `learningPacks`, `dashboard`, `readiness`, and `readinessPrompts`) on startup so the frontend can call `/api/v1/challenges` immediately after deployment.
+The application seeds the learning collections (`challenges`, `challengeDays`, `resources`, `teams`, `learningPacks`, `dashboard`, `readiness`, and `readinessPrompts`) on startup so the frontend can call `/api/v1/challenges` immediately after deployment. Authenticated learners can save daily wellness/study check-ins with `POST /api/v1/check-ins`.
 
 See [API.md](./API.md) for route contracts.
