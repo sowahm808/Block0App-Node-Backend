@@ -1,5 +1,7 @@
 import { ForbiddenError } from './errors.js';
+
 export const requirePermission = (permission: string) => async (req: any) => {
-  if (!req.user?.permissions?.includes(permission))
+  const permissions = req.user?.permissions ?? [];
+  if (!permissions.includes('*') && !permissions.includes(permission))
     throw new ForbiddenError(`Missing permission: ${permission}`);
 };
