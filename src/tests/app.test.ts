@@ -745,6 +745,72 @@ describe('MindUnlocking API', () => {
     expect(orderByCalled).toBe(false);
     expect(days.map((day: any) => day.day)).toEqual([1, 2, 3]);
   });
+
+  it('removes undefined fields before writing imported learning content to Firestore', async () => {
+    const writes = new Map<string, any>();
+    const db = {
+      collection(collectionName: string) {
+        return {
+          doc(id: string) {
+            return {
+              async get() {
+                return { exists: writes.has(`${collectionName}/${id}`) };
+              },
+              async set(data: any) {
+                expect(JSON.stringify(data)).not.toContain('undefined');
+                writes.set(`${collectionName}/${id}`, data);
+              },
+            };
+          },
+        };
+      },
+    };
+    const repo = new LearningRepository(db as any);
+
+    await repo.importLearningPack(
+      {
+        sourceFileName: undefined,
+        learningPack: { externalId: 'pack-with-optional-fields', title: 'Pack', status: 'draft' },
+        capsules: [
+          {
+            externalId: 'capsule-with-questions-array',
+            title: 'Capsule',
+            sequence: 1,
+            optionalMetadata: undefined,
+            questions: [
+              {
+                externalId: 'question-with-optional-fields',
+                sequence: 1,
+                stem: 'Stem?',
+                choices: [
+                  { id: 'A', label: 'A', text: 'A', optional: undefined },
+                  { id: 'B', label: 'B', text: 'B' },
+                ],
+                explanation: {
+                  correctChoiceId: 'A',
+                  correctRationale: 'Because A.',
+                  incorrectRationales: { B: 'Not B.' },
+                  reference: undefined,
+                },
+              },
+            ],
+          },
+        ],
+      } as any,
+      'admin-user',
+    );
+
+    expect(writes.get('capsules/capsule-with-questions-array')).not.toHaveProperty('questions');
+    expect(writes.get('capsules/capsule-with-questions-array')).not.toHaveProperty(
+      'optionalMetadata',
+    );
+    expect(writes.get('questions/question-with-optional-fields').choices[0]).not.toHaveProperty(
+      'optional',
+    );
+    expect(
+      writes.get('questionExplanations/question-with-optional-fields-explanation'),
+    ).not.toHaveProperty('reference');
+  });
   it('maps Firestore user documents', () => {
     const repo = Object.create(UsersRepository.prototype) as UsersRepository;
     const d = repo.map({
