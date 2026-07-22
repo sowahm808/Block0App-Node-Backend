@@ -22,6 +22,20 @@ import {
 } from './content-import.js';
 import type { CheckInInput } from './check-ins.schemas.js';
 
+const removeUndefinedProperties = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => (item === undefined ? null : removeUndefinedProperties(item)));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, removeUndefinedProperties(entry)]),
+    );
+  }
+  return value;
+};
+
 export class LearningRepository {
   constructor(private db: Firestore) {}
 
@@ -230,7 +244,7 @@ export class LearningRepository {
       } else {
         created++;
       }
-      await ref.set(data, { merge: true });
+      await ref.set(removeUndefinedProperties(data) as any, { merge: true });
       contentIds.push(id);
     };
     const packId = payload.learningPack.externalId;
@@ -241,11 +255,12 @@ export class LearningRepository {
     });
     for (const capsule of payload.capsules) {
       const capsuleId = capsule.externalId;
+      const capsuleDocument: Record<string, unknown> = { ...capsule };
+      delete capsuleDocument.questions;
       await upsert('capsules', capsuleId, {
-        ...capsule,
+        ...capsuleDocument,
         id: capsuleId,
         learningPackId: packId,
-        questions: undefined,
         importAudit: audit,
       });
       for (const question of capsule.questions) {
