@@ -34,6 +34,12 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/scenarios', listPublishedChallenges);
 
+  app.get('/challenges/current/today', async () => {
+    const current = await learning.getCurrentChallengeToday();
+    if (!current) throw new NotFoundError('Current challenge day not found');
+    return { data: current };
+  });
+
   app.post(
     '/check-ins',
     { preHandler: requireAuth, schema: { body: zodToJsonSchema(checkInSchema) } },

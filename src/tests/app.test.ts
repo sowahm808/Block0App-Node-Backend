@@ -261,6 +261,15 @@ describe('MindUnlocking API', () => {
     expect(scenarios.statusCode).toBe(200);
     expect(scenarios.json().data).toEqual(challenges.json().data);
 
+    const currentToday = await app.inject('/api/v1/challenges/current/today');
+    expect(currentToday.statusCode).toBe(200);
+    expect(currentToday.json().data).toMatchObject({
+      currentDay: 1,
+      totalDays: 21,
+      challenge: { slug: 'block-zero-21-day-medical-exam-prep' },
+      day: { challengeId: 'block-zero-21-day-medical-exam-prep', day: 1 },
+    });
+
     for (const path of ['/teams', '/learning-packs', '/dashboard', '/readiness']) {
       const response = await app.inject(`/api/v1${path}`);
       expect(response.statusCode).toBe(200);
