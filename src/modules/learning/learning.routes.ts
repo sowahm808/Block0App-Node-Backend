@@ -71,7 +71,11 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/learning-packs', async () => ({ data: await learning.listLearningPacks() }));
 
-  app.get('/dashboard', async () => ({ data: await learning.getDashboard() }));
+  const getDashboard = async () => ({ data: await learning.getDashboard() });
+
+  app.get('/dashboard', getDashboard);
+
+  app.get('/mentor/dashboard', getDashboard);
 
   app.get('/readiness', async () => ({ data: await learning.getReadiness() }));
 
