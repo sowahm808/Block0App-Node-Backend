@@ -105,9 +105,10 @@ export class LearningRepository {
     const snapshot = await this.db
       .collection('challengeDays')
       .where('challengeId', '==', challengeId)
-      .orderBy('day')
       .get();
-    const days = snapshot.docs.map((doc) => doc.data());
+    const days = snapshot.docs
+      .map((doc) => doc.data())
+      .sort((left: any, right: any) => (Number(left.day) || 0) - (Number(right.day) || 0));
     return days.length
       ? days
       : sampleChallengeDays.filter((day) => day.challengeId === challengeId);
