@@ -55,6 +55,7 @@ export async function authRoutes(
         'Firebase password reset links complete the reset flow through Firebase Authentication action handlers.',
     }),
   );
+  app.post('/sync', { preHandler: auth }, async (req) => req.user);
   app.post('/logout', { preHandler: auth }, async (req) => ({
     revoked: await deps.sessions.revokeActiveForUser(req.user!.uid, 'logout'),
   }));
