@@ -100,6 +100,15 @@ const env = loadEnv({
   FIREBASE_ACTION_CODE_URL: 'http://localhost/action',
 } as any);
 const token = (p: any) => Buffer.from(JSON.stringify(p)).toString('base64url');
+const prodEnv = loadEnv({
+  NODE_ENV: 'production',
+  ACCESS_TOKEN_SECRET: 'test-secret-test-secret-test-secret-32',
+  FIREBASE_PROJECT_ID: 'prod-project',
+  FIREBASE_CLIENT_EMAIL: 'firebase-admin@prod-project.iam.gserviceaccount.com',
+  FIREBASE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----',
+  FIREBASE_STORAGE_BUCKET: 'prod-project.appspot.com',
+  CORS_ALLOWED_ORIGINS: 'https://custom.example.com',
+} as any);
 
 describe('MindUnlocking API', () => {
   let users: MemUsers, sessions: MemSessions, svc: AuthService;
@@ -471,6 +480,32 @@ describe('MindUnlocking API', () => {
 
     expect(saved.statusCode).toBe(201);
     expect(saved.json().data.channels).toEqual(['in_app', 'in_app', 'email', 'sms']);
+  });
+
+  it('/auth/me accepts backend-issued access tokens in production', async () => {
+    const prodSvc = new AuthService(firebase() as any, users as any, sessions as any, prodEnv);
+    const app = await buildApp({
+      authService: prodSvc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await prodSvc.signAccessToken('u-prod', 'prod@example.com', ['scholar:access']);
+
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({
+      uid: 'u-prod',
+      email: 'prod@example.com',
+      permissions: ['scholar:access'],
+    });
   });
 
   it('/auth/me requires authentication', async () => {
