@@ -9,6 +9,7 @@ import { loggerOptions } from './modules/common/logger.js';
 import { errorHandler } from './modules/common/problem-details.js';
 import { registerSecurity } from './modules/common/security-headers.js';
 import { registerRateLimit } from './modules/common/rate-limit.js';
+import { authenticate } from './modules/common/auth-middleware.js';
 import { UsersRepository } from './modules/users/users.repository.js';
 import { AuthRepository } from './modules/auth/auth.repository.js';
 import { AuthService } from './modules/auth/auth.service.js';
@@ -203,6 +204,7 @@ export async function buildApp(overrides?: any) {
   if (overrides?.seedLearning !== false && typeof learning.seedAll === 'function') {
     await learning.seedAll();
   }
+  const profile = { preHandler: authenticate(authService) };
   const meta = {
     name: 'MindUnlocking API',
     version: 'v1',
@@ -217,6 +219,7 @@ export async function buildApp(overrides?: any) {
       teams: '/api/v1/teams',
       learningPacks: '/api/v1/learning-packs',
       dashboard: '/api/v1/dashboard',
+      profile: '/api/v1/profile',
     },
   };
   app.get('/api/v1', async () => meta);
@@ -227,6 +230,7 @@ export async function buildApp(overrides?: any) {
   app.get('/health/ready', async () => readiness.ready());
   await app.register(
     async (v1) => {
+      v1.get('/profile', profile, async (req) => req.user);
       await v1.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await v1.register(learningRoutes, { learning, authService } as any);
@@ -240,6 +244,7 @@ export async function buildApp(overrides?: any) {
   );
   await app.register(
     async (api) => {
+      api.get('/profile', profile, async (req) => req.user);
       await api.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await api.register(learningRoutes, { learning, authService } as any);
