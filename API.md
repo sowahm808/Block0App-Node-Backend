@@ -31,6 +31,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 
 ## Health and docs
 
+- `GET /api/v1/health` returns a lightweight liveness response for frontend deployments. Compatibility alias: `GET /api/health`.
 - `GET /health/live`
 - `GET /health/ready`
 - `GET /docs`
