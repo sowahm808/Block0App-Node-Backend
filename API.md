@@ -35,4 +35,6 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 - `GET /health/ready`
 - `GET /docs`
 
+Authenticated endpoints accept backend access tokens or Firebase ID tokens in the standard `Authorization: Bearer <token>` header. For browser clients and compatibility routes, the same shared authentication middleware also accepts lowercase bearer schemes, `x-access-token`, `x-firebase-token`, or token cookies named `accessToken`, `access_token`, `idToken`, or `id_token`.
+
 Errors use RFC 7807-style `application/problem+json` with `type`, `title`, `status`, `detail`, `traceId`, and optional validation `errors`.
