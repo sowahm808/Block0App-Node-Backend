@@ -79,6 +79,28 @@ export class LearningRepository {
     );
   }
 
+  async getCurrentChallengeToday() {
+    const dashboard = (await this.getDashboard()) as any;
+    const challengeId = dashboard.activeChallengeId;
+    const challenge = challengeId
+      ? await this.getChallenge(challengeId)
+      : (await this.listChallenges())[0];
+    if (!challenge) return null;
+    const days = await this.getChallengeDays(challenge.id);
+    const dayNumber = Math.min(
+      Math.max(Number(dashboard.currentDay) || 1, 1),
+      Number(challenge.durationDays) || days.length || 1,
+    );
+    const day = days.find((item: any) => item.day === dayNumber) ?? days[0] ?? null;
+    return {
+      challenge,
+      day,
+      currentDay: dayNumber,
+      totalDays: challenge.durationDays ?? days.length,
+      dashboard,
+    };
+  }
+
   async getChallengeDays(challengeId: string) {
     const snapshot = await this.db
       .collection('challengeDays')

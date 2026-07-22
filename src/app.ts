@@ -92,6 +92,27 @@ export async function buildApp(overrides?: any) {
             (await import('./modules/learning/learning.seed.js')).sampleChallengeDays.filter(
               (day) => day.challengeId === challengeId,
             ),
+          getCurrentChallengeToday: async () => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const dashboard = seed.sampleDashboard;
+            const challenge = seed.sampleChallenges.find(
+              (item) => item.id === dashboard.activeChallengeId,
+            );
+            const day = seed.sampleChallengeDays.find(
+              (item) =>
+                item.challengeId === dashboard.activeChallengeId &&
+                item.day === dashboard.currentDay,
+            );
+            return challenge && day
+              ? {
+                  challenge,
+                  day,
+                  currentDay: dashboard.currentDay,
+                  totalDays: challenge.durationDays,
+                  dashboard,
+                }
+              : null;
+          },
           listResources: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleResources,
           listTeams: async () => (await import('./modules/learning/learning.seed.js')).sampleTeams,
