@@ -12,6 +12,7 @@ import {
   sampleQuestionAttempts,
   sampleReadiness,
   sampleReadinessPrompts,
+  sampleContentReviews,
   sampleResources,
   sampleTeams,
 } from './learning.seed.js';
@@ -293,6 +294,22 @@ export class LearningRepository {
     return { created, updated, skipped: 0, failed: 0, errors: [], contentIds, audit };
   }
 
+  async listReviewContent() {
+    const snapshot = await this.db.collection('contentReviews').get();
+    const reviews = snapshot.docs.map((doc) => doc.data());
+    const sourceReviews = reviews.length ? reviews : sampleContentReviews;
+    return Promise.all(
+      sourceReviews.map(async (review: any) => {
+        const content = await this.getReviewEntity(review.entityType, review.entityId);
+        return {
+          ...review,
+          content,
+          title: content?.title ?? content?.stem ?? review.entityId,
+        };
+      }),
+    );
+  }
+
   async getDashboard() {
     const snapshot = await this.db.collection('dashboard').limit(1).get();
     return snapshot.empty ? sampleDashboard : snapshot.docs[0].data();
@@ -301,6 +318,16 @@ export class LearningRepository {
   async getReadiness() {
     const snapshot = await this.db.collection('readiness').limit(1).get();
     return snapshot.empty ? sampleReadiness : snapshot.docs[0].data();
+  }
+
+  private async getReviewEntity(entityType: string, entityId: string) {
+    const collectionByType: Record<string, { collection: string; fallback: any[] }> = {
+      learningPack: { collection: 'learningPacks', fallback: sampleLearningPacks },
+      capsule: { collection: 'capsules', fallback: sampleCapsules },
+      question: { collection: 'questions', fallback: sampleQuestions },
+    };
+    const source = collectionByType[entityType];
+    return source ? this.getById(source.collection, entityId, source.fallback) : null;
   }
 
   private async getById(collectionName: string, id: string, fallback: any[]) {

@@ -294,6 +294,16 @@ describe('MindUnlocking API', () => {
     expect(legacyLearningPacks.json().data).toEqual(
       (await app.inject('/api/v1/learning-packs')).json().data,
     );
+
+    const reviewContent = await app.inject('/api/v1/review/content');
+    expect(reviewContent.statusCode).toBe(200);
+    expect(reviewContent.json().data[0]).toMatchObject({
+      id: 'review-medical-exam-foundations',
+      entityType: 'learningPack',
+      entityId: 'medical-exam-foundations',
+      title: 'Medical Exam Foundations',
+      content: { id: 'medical-exam-foundations' },
+    });
   });
 
   it('keeps W1 resume payloads separate from W2/W3 submit feedback', async () => {

@@ -119,6 +119,25 @@ export async function buildApp(overrides?: any) {
           listTeams: async () => (await import('./modules/learning/learning.seed.js')).sampleTeams,
           listLearningPacks: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleLearningPacks,
+          listReviewContent: async () => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            return seed.sampleContentReviews.map((review) => {
+              const sources = [
+                ...seed.sampleLearningPacks,
+                ...seed.sampleCapsules,
+                ...seed.sampleQuestions,
+              ];
+              const content = sources.find((item) => item.id === review.entityId) ?? null;
+              return {
+                ...review,
+                content,
+                title:
+                  content && 'title' in content
+                    ? content.title
+                    : (content?.stem ?? review.entityId),
+              };
+            });
+          },
           getDashboard: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleDashboard,
           getReadiness: async () =>
