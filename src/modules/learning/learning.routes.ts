@@ -34,6 +34,8 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/scenarios', listPublishedChallenges);
 
+  app.get('/scenarios/available', listPublishedChallenges);
+
   app.get('/challenges/current/today', async () => {
     const current = await learning.getCurrentChallengeToday();
     if (!current) throw new NotFoundError('Current challenge day not found');
