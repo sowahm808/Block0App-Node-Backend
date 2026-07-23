@@ -275,6 +275,8 @@ export async function buildApp(overrides?: any) {
       systemSettings: '/api/v1/admin/system-settings',
       dashboard: '/api/v1/dashboard',
       profile: '/api/v1/profile',
+      notifications: '/api/v1/notifications',
+      notificationPreferences: '/api/v1/notification-preferences',
     },
   };
   app.get('/api/v1', async () => meta);
@@ -294,6 +296,11 @@ export async function buildApp(overrides?: any) {
         notifications,
         authService,
       } as any);
+      await v1.register(notificationsRoutes, {
+        prefix: '/notification-preferences',
+        notifications,
+        authService,
+      } as any);
     },
     { prefix: '/api/v1' },
   );
@@ -305,6 +312,11 @@ export async function buildApp(overrides?: any) {
       await api.register(learningRoutes, { learning, authService, users } as any);
       await api.register(notificationsRoutes, {
         prefix: '/notifications',
+        notifications,
+        authService,
+      } as any);
+      await api.register(notificationsRoutes, {
+        prefix: '/notification-preferences',
         notifications,
         authService,
       } as any);
