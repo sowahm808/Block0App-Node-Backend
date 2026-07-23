@@ -101,6 +101,17 @@ const env = loadEnv({
   FIREBASE_ACTION_CODE_URL: 'http://localhost/action',
 } as any);
 const token = (p: any) => Buffer.from(JSON.stringify(p)).toString('base64url');
+const registration = (overrides: Record<string, unknown> = {}) => ({
+  email: 'learner@example.com',
+  password: 'password123',
+  displayName: 'Learner Example',
+  country: 'US',
+  timeZone: 'America/New_York',
+  primaryStudyDevice: 'laptop',
+  acceptedTerms: true,
+  acceptedPrivacyPolicy: true,
+  ...overrides,
+});
 const prodEnv = loadEnv({
   NODE_ENV: 'production',
   ACCESS_TOKEN_SECRET: 'test-secret-test-secret-test-secret-32',
@@ -159,9 +170,68 @@ describe('MindUnlocking API', () => {
     expect(r.statusCode).toBe(400);
     expect(r.json()).toMatchObject({ title: 'Validation Failed', status: 400 });
   });
+  it('accepts the complete registration onboarding payload', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: registration({
+        email: '  MixedCase@example.COM ',
+        displayName: '  Dr Example  ',
+        country: 'us',
+      }),
+    });
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toMatchObject({ email: 'mixedcase@example.com' });
+    expect(await users.get('uid-mixedcase@example.com')).toMatchObject({
+      displayName: 'Dr Example',
+      email: 'mixedcase@example.com',
+      country: 'US',
+      timeZone: 'America/New_York',
+      primaryStudyDevice: 'laptop',
+      acceptedTerms: true,
+      acceptedPrivacyPolicy: true,
+    });
+  });
+  it('rejects invalid onboarding registration fields', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      payload: registration({
+        displayName: 'A',
+        country: 'ZZ',
+        timeZone: 'Not/AZone',
+        primaryStudyDevice: 'watch',
+        acceptedTerms: false,
+        acceptedPrivacyPolicy: false,
+      }),
+    });
+    expect(r.statusCode).toBe(400);
+    expect(JSON.stringify(r.json().errors)).toContain('displayName');
+    expect(JSON.stringify(r.json().errors)).toContain('country');
+    expect(JSON.stringify(r.json().errors)).toContain('timeZone');
+    expect(JSON.stringify(r.json().errors)).toContain('primaryStudyDevice');
+    expect(JSON.stringify(r.json().errors)).toContain('acceptedTerms');
+    expect(JSON.stringify(r.json().errors)).toContain('acceptedPrivacyPolicy');
+  });
   it('handles duplicate email', async () => {
     await expect(
-      svc.register({ email: 'dupe@example.com', password: 'password123', displayName: 'Dupe' }),
+      svc.register(registration({ email: 'dupe@example.com', displayName: 'Dupe' }) as any),
     ).rejects.toThrow('registered');
   });
 
@@ -175,24 +245,27 @@ describe('MindUnlocking API', () => {
     const service = new AuthService(auth, users as any, sessions as any, env);
 
     await expect(
-      service.register({
-        email: 'action-link@example.com',
-        password: 'password123',
-        displayName: 'Action Link',
-      }),
+      service.register(
+        registration({ email: 'action-link@example.com', displayName: 'Action Link' }) as any,
+      ),
     ).resolves.toMatchObject({
       email: 'action-link@example.com',
       emailVerificationLink: null,
     });
     expect(await users.get('uid-action-link@example.com')).toMatchObject({
       email: 'action-link@example.com',
+      country: 'US',
+      timeZone: 'America/New_York',
+      primaryStudyDevice: 'laptop',
+      acceptedTerms: true,
+      acceptedPrivacyPolicy: true,
     });
   });
 
   it('rolls back Firebase user when profile setup fails', async () => {
     users.fail = true;
     await expect(
-      svc.register({ email: 'a@example.com', password: 'password123', displayName: 'A' }),
+      svc.register(registration({ email: 'a@example.com', displayName: 'Able Learner' }) as any),
     ).rejects.toThrow('firestore');
   });
   it('rejects invalid Firebase ID token', async () => {

@@ -6,8 +6,11 @@ import { AuthRepository } from './auth.repository.js';
 import type { Env } from '../../config/env.js';
 import { isAppRole, resolvePermissions } from '../common/roles-permissions.js';
 import type { AuthenticatedUser } from '../users/users.types.js';
+import type { RegisterInput } from './auth.schemas.js';
 
 const normalize = (email: string) => email.trim().toLowerCase();
+const TERMS_VERSION = '2026-07-23';
+const PRIVACY_POLICY_VERSION = '2026-07-23';
 export class AuthService {
   private key: Uint8Array;
   constructor(
@@ -100,8 +103,9 @@ export class AuthService {
       throw new UnauthorizedError('Invalid access token.');
     }
   }
-  async register(input: { email: string; password: string; displayName: string }) {
+  async register(input: RegisterInput) {
     const email = normalize(input.email);
+    const acceptedAt = new Date();
     let uid = '';
     try {
       const created = await this.auth.createUser({
@@ -116,6 +120,15 @@ export class AuthService {
         uid,
         email,
         displayName: input.displayName,
+        country: input.country,
+        timeZone: input.timeZone,
+        primaryStudyDevice: input.primaryStudyDevice ?? null,
+        acceptedTerms: input.acceptedTerms,
+        acceptedTermsAt: acceptedAt,
+        acceptedTermsVersion: TERMS_VERSION,
+        acceptedPrivacyPolicy: input.acceptedPrivacyPolicy,
+        acceptedPrivacyPolicyAt: acceptedAt,
+        acceptedPrivacyPolicyVersion: PRIVACY_POLICY_VERSION,
         emailVerified: false,
         mfaEnabled: false,
         administrativeMfaRequired: false,
