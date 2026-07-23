@@ -286,6 +286,7 @@ export const registerSchema = z.object({
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 export const verifyEmailSchema = z.object({ email: emailSchema, token: z.string().min(10) });
+export const firebaseResyncSchema = z.object({ firebaseIdToken: z.string().min(10) });
 export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().optional(),

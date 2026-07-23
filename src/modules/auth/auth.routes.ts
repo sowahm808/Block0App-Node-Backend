@@ -8,6 +8,7 @@ import {
   loginSchema,
   refreshSchema,
   forgotPasswordSchema,
+  firebaseResyncSchema,
   resetPasswordSchema,
   revokeSchema,
 } from './auth.schemas.js';
@@ -32,6 +33,12 @@ export async function authRoutes(
     },
   );
   app.post(
+    '/firebase/resync',
+    { ...authRateLimit, schema: { body: zodToJsonSchema(firebaseResyncSchema) } },
+    async (req) =>
+      deps.authService.resyncFirebaseEmailVerification(firebaseResyncSchema.parse(req.body)),
+  );
+  app.post(
     '/login',
     { ...authRateLimit, schema: { body: zodToJsonSchema(loginSchema) } },
     async (req) => deps.authService.login(loginSchema.parse(req.body)),
@@ -42,7 +49,10 @@ export async function authRoutes(
   app.post(
     '/forgot-password',
     { ...authRateLimit, schema: { body: zodToJsonSchema(forgotPasswordSchema) } },
-    async (req) => deps.authService.forgotPassword(forgotPasswordSchema.parse(req.body).email),
+    async (req, reply) => {
+      await deps.authService.forgotPassword(forgotPasswordSchema.parse(req.body).email);
+      return reply.status(204).send();
+    },
   );
   app.post(
     '/reset-password',
