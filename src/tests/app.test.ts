@@ -278,6 +278,7 @@ describe('MindUnlocking API', () => {
     for (const path of [
       '/teams',
       '/learning-packs',
+      '/rewards',
       '/dashboard',
       '/mentor/dashboard',
       '/review/dashboard',
@@ -288,6 +289,18 @@ describe('MindUnlocking API', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const rewards = await app.inject('/api/v1/rewards');
+    expect(rewards.statusCode).toBe(200);
+    expect(rewards.json().data[0]).toMatchObject({
+      id: 'daily-check-in-starter',
+      type: 'badge',
+      status: 'active',
+    });
+
+    const legacyRewards = await app.inject('/rewards');
+    expect(legacyRewards.statusCode).toBe(200);
+    expect(legacyRewards.json().data).toEqual(rewards.json().data);
 
     const legacyLearningPacks = await app.inject('/learning-packs');
     expect(legacyLearningPacks.statusCode).toBe(200);

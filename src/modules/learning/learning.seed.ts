@@ -255,6 +255,42 @@ export const sampleReadinessPrompts = [
   },
 ];
 
+export const sampleRewards = [
+  {
+    id: 'daily-check-in-starter',
+    type: 'badge',
+    title: 'Daily Check-in Starter',
+    description: 'Awarded for completing the first readiness check-in.',
+    points: 25,
+    earned: false,
+    earnedAtUtc: null,
+    icon: 'sparkles',
+    status: 'active',
+  },
+  {
+    id: 'active-recall-sprint',
+    type: 'points',
+    title: 'Active Recall Sprint',
+    description: "Complete today's active-recall block to unlock these points.",
+    points: 50,
+    earned: false,
+    earnedAtUtc: null,
+    icon: 'bolt',
+    status: 'active',
+  },
+  {
+    id: 'seven-day-streak',
+    type: 'badge',
+    title: '7-Day Study Streak',
+    description: 'Keep studying for seven consecutive days during the challenge.',
+    points: 100,
+    earned: false,
+    earnedAtUtc: null,
+    icon: 'flame',
+    status: 'active',
+  },
+];
+
 export const learningSeedCollections = {
   challenges: sampleChallenges,
   challengeDays: sampleChallengeDays,
@@ -271,4 +307,5 @@ export const learningSeedCollections = {
   dashboard: [sampleDashboard],
   readiness: [sampleReadiness],
   readinessPrompts: sampleReadinessPrompts,
+  rewards: sampleRewards,
 };
