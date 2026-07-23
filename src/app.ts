@@ -121,6 +121,10 @@ export async function buildApp(overrides?: any) {
             (await import('./modules/learning/learning.seed.js')).sampleLearningPacks,
           listRewards: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleRewards,
+          listCertificates: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleCertificates,
+          listRaffleEntries: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleRaffleEntries,
           getSystemSettings: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleSystemSettings,
           listReviewContent: async () => {
@@ -256,6 +260,8 @@ export async function buildApp(overrides?: any) {
       teams: '/api/v1/teams',
       learningPacks: '/api/v1/learning-packs',
       rewards: '/api/v1/rewards',
+      certificates: '/api/v1/certificates',
+      raffleEntries: '/api/v1/raffle-entries',
       systemSettings: '/api/v1/admin/system-settings',
       dashboard: '/api/v1/dashboard',
       profile: '/api/v1/profile',

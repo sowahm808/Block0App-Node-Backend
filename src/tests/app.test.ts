@@ -279,6 +279,8 @@ describe('MindUnlocking API', () => {
       '/teams',
       '/learning-packs',
       '/rewards',
+      '/certificates',
+      '/raffle-entries',
       '/dashboard',
       '/mentor/dashboard',
       '/review/dashboard',
@@ -310,6 +312,26 @@ describe('MindUnlocking API', () => {
     const legacyRewards = await app.inject('/rewards');
     expect(legacyRewards.statusCode).toBe(200);
     expect(legacyRewards.json().data).toEqual(rewards.json().data);
+
+    const certificates = await app.inject('/api/v1/certificates');
+    expect(certificates.statusCode).toBe(200);
+    expect(certificates.json().data[0]).toMatchObject({
+      id: 'certificate-block-zero-foundations-seed-scholar',
+      status: 'issued',
+    });
+    const legacyCertificates = await app.inject('/certificates');
+    expect(legacyCertificates.statusCode).toBe(200);
+    expect(legacyCertificates.json().data).toEqual(certificates.json().data);
+
+    const raffleEntries = await app.inject('/api/v1/raffle-entries');
+    expect(raffleEntries.statusCode).toBe(200);
+    expect(raffleEntries.json().data[0]).toMatchObject({
+      id: 'raffle-entry-daily-check-in-seed-scholar',
+      status: 'active',
+    });
+    const legacyRaffleEntries = await app.inject('/raffle-entries');
+    expect(legacyRaffleEntries.statusCode).toBe(200);
+    expect(legacyRaffleEntries.json().data).toEqual(raffleEntries.json().data);
 
     const legacyLearningPacks = await app.inject('/learning-packs');
     expect(legacyLearningPacks.statusCode).toBe(200);
