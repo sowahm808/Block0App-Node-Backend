@@ -576,13 +576,25 @@ describe('MindUnlocking API', () => {
       url: '/api/v1/notification-preferences',
       headers: { authorization: `Bearer ${access.token}` },
     });
+    const loadedWithTrailingSlash = await app.inject({
+      url: '/api/v1/notification-preferences/',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    const loadedWithDuplicateSlash = await app.inject({
+      url: '/api/v1//notification-preferences',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
 
     expect(loaded.statusCode).toBe(200);
+    expect(loadedWithTrailingSlash.statusCode).toBe(200);
+    expect(loadedWithDuplicateSlash.statusCode).toBe(200);
     expect(loaded.json().data.examReminder).toMatchObject({
       userId: 'u-notification-preferences',
       examName: 'NCLEX',
       reminderTime: '07:15',
     });
+    expect(loadedWithTrailingSlash.json()).toEqual(loaded.json());
+    expect(loadedWithDuplicateSlash.json()).toEqual(loaded.json());
   });
 
   it('returns the authenticated user notification settings from the collection endpoint', async () => {

@@ -23,6 +23,10 @@ import { notificationsRoutes } from './modules/notifications/notifications.route
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
+    routerOptions: {
+      ignoreTrailingSlash: true,
+      ignoreDuplicateSlashes: true,
+    },
     logger: loggerOptions,
     genReqId: (req) => String(req.headers['x-correlation-id'] ?? crypto.randomUUID()),
   });
