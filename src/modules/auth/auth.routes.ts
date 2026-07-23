@@ -19,11 +19,8 @@ export async function authRoutes(
   deps: { authService: AuthService; sessions: AuthRepository },
 ) {
   const auth = authenticate(deps.authService);
-  app.post(
-    '/register',
-    { ...authRateLimit, schema: { body: zodToJsonSchema(registerSchema) } },
-    async (req, reply) =>
-      reply.status(201).send(await deps.authService.register(registerSchema.parse(req.body))),
+  app.post('/register', authRateLimit, async (req, reply) =>
+    reply.status(201).send(await deps.authService.register(registerSchema.parse(req.body))),
   );
   app.post(
     '/verify-email',

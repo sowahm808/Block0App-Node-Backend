@@ -10,6 +10,15 @@ export interface AppUser {
   displayName: string;
   photoUrl?: string | null;
   authProvider?: string;
+  country?: string | null;
+  timeZone?: string | null;
+  primaryStudyDevice?: 'phone' | 'tablet' | 'laptop' | 'desktop' | null;
+  acceptedTerms?: boolean;
+  acceptedTermsAt?: Date | null;
+  acceptedTermsVersion?: string | null;
+  acceptedPrivacyPolicy?: boolean;
+  acceptedPrivacyPolicyAt?: Date | null;
+  acceptedPrivacyPolicyVersion?: string | null;
   emailVerified: boolean;
   status?: AppUserStatus;
   roles?: AppRole[];
