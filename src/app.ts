@@ -265,6 +265,8 @@ export async function buildApp(overrides?: any) {
       auth: '/api/v1/auth',
       challenges: '/api/v1/challenges',
       scenarios: '/api/v1/scenarios',
+      rehearsals: '/api/v1/rehearsals',
+      availableRehearsals: '/api/v1/rehearsals/available',
       teams: '/api/v1/teams',
       learningPacks: '/api/v1/learning-packs',
       rewards: '/api/v1/rewards',

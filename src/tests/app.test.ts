@@ -266,6 +266,18 @@ describe('MindUnlocking API', () => {
     expect(availableScenarios.statusCode).toBe(200);
     expect(availableScenarios.json().data).toEqual(challenges.json().data);
 
+    const rehearsals = await app.inject('/api/v1/rehearsals');
+    expect(rehearsals.statusCode).toBe(200);
+    expect(rehearsals.json().data).toEqual(challenges.json().data);
+
+    const availableRehearsals = await app.inject('/api/v1/rehearsals/available');
+    expect(availableRehearsals.statusCode).toBe(200);
+    expect(availableRehearsals.json().data).toEqual(challenges.json().data);
+
+    const legacyAvailableRehearsals = await app.inject('/rehearsals/available');
+    expect(legacyAvailableRehearsals.statusCode).toBe(200);
+    expect(legacyAvailableRehearsals.json().data).toEqual(challenges.json().data);
+
     const currentToday = await app.inject('/api/v1/challenges/current/today');
     expect(currentToday.statusCode).toBe(200);
     expect(currentToday.json().data).toMatchObject({
