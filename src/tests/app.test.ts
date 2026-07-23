@@ -548,6 +548,43 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('returns notification preferences from the legacy preferences endpoint', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-notification-preferences', 'prefs@example.com', [
+      'scholar:access',
+    ]);
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/notification-preferences/exam-reminders/me',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: {
+        enabled: true,
+        examName: 'NCLEX',
+        reminderTime: '07:15',
+      },
+    });
+
+    const loaded = await app.inject({
+      url: '/api/v1/notification-preferences',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json().data.examReminder).toMatchObject({
+      userId: 'u-notification-preferences',
+      examName: 'NCLEX',
+      reminderTime: '07:15',
+    });
+  });
+
   it('returns the authenticated user notification settings from the collection endpoint', async () => {
     const app = await buildApp({
       authService: svc,
