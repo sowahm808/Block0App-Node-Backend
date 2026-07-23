@@ -91,6 +91,8 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/review/content', async () => ({ data: await learning.listReviewContent() }));
 
+  app.get('/review/questions', async () => ({ data: await learning.listReviewQuestions() }));
+
   app.get('/admin/dashboard', getDashboard);
 
   app.get('/readiness', async () => ({ data: await learning.getReadiness() }));

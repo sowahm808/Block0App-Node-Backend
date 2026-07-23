@@ -294,6 +294,33 @@ export class LearningRepository {
     return { created, updated, skipped: 0, failed: 0, errors: [], contentIds, audit };
   }
 
+  async listReviewQuestions() {
+    const snapshot = await this.db.collection('questions').get();
+    const questions = snapshot.docs.map((doc) => doc.data());
+    const sourceQuestions = questions.length ? questions : sampleQuestions;
+    return Promise.all(
+      sourceQuestions.map(async (question: any) => {
+        const explanation = (await this.getByField(
+          'questionExplanations',
+          'questionId',
+          question.id,
+          sampleQuestionExplanations,
+        )) as any;
+        const review = (await this.getByField(
+          'contentReviews',
+          'entityId',
+          question.id,
+          sampleContentReviews,
+        )) as any;
+        return {
+          ...question,
+          review: review && review.entityType === 'question' ? review : null,
+          explanation,
+        };
+      }),
+    );
+  }
+
   async listReviewContent() {
     const snapshot = await this.db.collection('contentReviews').get();
     const reviews = snapshot.docs.map((doc) => doc.data());
