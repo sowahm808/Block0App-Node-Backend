@@ -291,6 +291,24 @@ export const sampleRewards = [
   },
 ];
 
+export const sampleSystemSettings = {
+  id: 'default',
+  appName: 'MindUnlocking',
+  environment: 'production',
+  maintenanceMode: false,
+  registrationEnabled: true,
+  emailVerificationRequired: true,
+  featureFlags: {
+    rewards: true,
+    readiness: true,
+    notifications: true,
+    learningPacks: true,
+    contentReview: true,
+  },
+  supportEmail: 'support@mindunlocking.com',
+  updatedAtUtc: null,
+};
+
 export const learningSeedCollections = {
   challenges: sampleChallenges,
   challengeDays: sampleChallengeDays,
@@ -308,4 +326,5 @@ export const learningSeedCollections = {
   readiness: [sampleReadiness],
   readinessPrompts: sampleReadinessPrompts,
   rewards: sampleRewards,
+  systemSettings: [sampleSystemSettings],
 };

@@ -283,12 +283,21 @@ describe('MindUnlocking API', () => {
       '/mentor/dashboard',
       '/review/dashboard',
       '/admin/dashboard',
+      '/admin/system-settings',
       '/readiness',
     ]) {
       const response = await app.inject(`/api/v1${path}`);
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const systemSettings = await app.inject('/api/v1/admin/system-settings');
+    expect(systemSettings.statusCode).toBe(200);
+    expect(systemSettings.json().data).toMatchObject({
+      id: 'default',
+      maintenanceMode: false,
+      featureFlags: { rewards: true },
+    });
 
     const rewards = await app.inject('/api/v1/rewards');
     expect(rewards.statusCode).toBe(200);

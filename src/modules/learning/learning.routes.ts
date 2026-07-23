@@ -97,6 +97,8 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/admin/dashboard', getDashboard);
 
+  app.get('/admin/system-settings', async () => ({ data: await learning.getSystemSettings() }));
+
   app.get('/readiness', async () => ({ data: await learning.getReadiness() }));
 
   app.get('/readiness/prompts', async () => ({ data: await learning.listReadinessPrompts() }));
