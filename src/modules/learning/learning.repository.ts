@@ -19,6 +19,10 @@ import {
   sampleSystemSettings,
   sampleResources,
   sampleTeams,
+  sampleReviewScenarios,
+  sampleAiDrafts,
+  sampleReviewHistory,
+  sampleSupportRequests,
 } from './learning.seed.js';
 import {
   importFailedSummary,
@@ -357,6 +361,30 @@ export class LearningRepository {
         };
       }),
     );
+  }
+
+  async listReviewScenarios() {
+    const snapshot = await this.db.collection('reviewScenarios').get();
+    const scenarios = snapshot.docs.map((doc) => doc.data());
+    return scenarios.length ? scenarios : sampleReviewScenarios;
+  }
+
+  async listAiDrafts() {
+    const snapshot = await this.db.collection('aiDrafts').get();
+    const drafts = snapshot.docs.map((doc) => doc.data());
+    return drafts.length ? drafts : sampleAiDrafts;
+  }
+
+  async listReviewHistory() {
+    const snapshot = await this.db.collection('reviewHistory').get();
+    const history = snapshot.docs.map((doc) => doc.data());
+    return history.length ? history : sampleReviewHistory;
+  }
+
+  async listSupportRequests() {
+    const snapshot = await this.db.collection('supportRequests').get();
+    const requests = snapshot.docs.map((doc) => doc.data());
+    return requests.length ? requests : sampleSupportRequests;
   }
 
   async getDashboard() {

@@ -14,6 +14,10 @@ export class UsersRepository {
     const doc = await this.col().doc(uid).get();
     return doc.exists ? this.map(doc.data()!) : null;
   }
+  async list(): Promise<AppUser[]> {
+    const snapshot = await this.col().get();
+    return snapshot.docs.map((doc) => this.map(doc.data()));
+  }
   async upsert(
     user: Omit<AppUser, 'createdUtc' | 'updatedUtc'> &
       Partial<Pick<AppUser, 'createdUtc' | 'updatedUtc'>>,

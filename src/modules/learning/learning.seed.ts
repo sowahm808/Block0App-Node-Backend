@@ -291,7 +291,6 @@ export const sampleRewards = [
   },
 ];
 
-
 export const sampleCertificates = [
   {
     id: 'certificate-block-zero-foundations-seed-scholar',
@@ -336,6 +335,51 @@ export const sampleSystemSettings = {
   updatedAtUtc: null,
 };
 
+export const sampleReviewScenarios = sampleChallenges.map((challenge) => ({
+  ...challenge,
+  scenarioId: challenge.id,
+  reviewStatus: 'ready_for_review',
+}));
+
+export const sampleAiDrafts = [
+  {
+    id: 'ai-draft-medical-exam-foundations',
+    entityType: 'learningPack',
+    entityId: 'medical-exam-foundations',
+    title: 'Medical Exam Foundations AI Draft',
+    status: 'draft',
+    createdBy: 'seed-ai',
+    createdAtUtc: '2026-01-01T00:00:00.000Z',
+    updatedAtUtc: '2026-01-01T00:00:00.000Z',
+  },
+];
+
+export const sampleReviewHistory = [
+  {
+    id: 'history-review-medical-exam-foundations',
+    reviewId: 'review-medical-exam-foundations',
+    action: 'approved',
+    actorId: 'seed-reviewer',
+    entityType: 'learningPack',
+    entityId: 'medical-exam-foundations',
+    notes: 'Seed content approved for smoke testing.',
+    createdAtUtc: '2026-01-01T00:00:00.000Z',
+  },
+];
+
+export const sampleSupportRequests = [
+  {
+    id: 'support-request-seed-scholar',
+    requesterId: 'seed-scholar',
+    requesterName: 'Seed Scholar',
+    subject: 'Need help planning Day 1',
+    status: 'open',
+    priority: 'normal',
+    createdAtUtc: '2026-01-01T00:00:00.000Z',
+    updatedAtUtc: '2026-01-01T00:00:00.000Z',
+  },
+];
+
 export const learningSeedCollections = {
   challenges: sampleChallenges,
   challengeDays: sampleChallengeDays,
@@ -356,4 +400,8 @@ export const learningSeedCollections = {
   certificates: sampleCertificates,
   raffleEntries: sampleRaffleEntries,
   systemSettings: [sampleSystemSettings],
+  reviewScenarios: sampleReviewScenarios,
+  aiDrafts: sampleAiDrafts,
+  reviewHistory: sampleReviewHistory,
+  supportRequests: sampleSupportRequests,
 };

@@ -277,6 +277,8 @@ describe('MindUnlocking API', () => {
 
     for (const path of [
       '/teams',
+      '/mentor/teams',
+      '/mentor/support-requests',
       '/learning-packs',
       '/rewards',
       '/certificates',
@@ -284,7 +286,11 @@ describe('MindUnlocking API', () => {
       '/dashboard',
       '/mentor/dashboard',
       '/review/dashboard',
+      '/review/scenarios',
+      '/review/ai-drafts',
+      '/review/history',
       '/admin/dashboard',
+      '/admin/users',
       '/admin/system-settings',
       '/readiness',
     ]) {
