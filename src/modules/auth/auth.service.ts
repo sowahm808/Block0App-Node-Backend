@@ -47,6 +47,24 @@ export class AuthService {
       .sign(this.key);
     return { token, expires };
   }
+
+  private tokenPermissions(decoded: any, fallback: string[] = ['scholar:access']) {
+    return (decoded.permission as string[]) ?? (decoded.permissions as string[]) ?? fallback;
+  }
+  private isDisabledStatus(status?: string | null) {
+    return status === 'Disabled' || status === 'Suspended' || status === 'Deleted';
+  }
+  private async issueBackendTokens(uid: string, email: string | undefined, permissions: string[]) {
+    const access = await this.signAccessToken(uid, email, permissions);
+    const refresh = await this.sessions.create(uid, this.env.REFRESH_TOKEN_TTL_DAYS);
+    return {
+      accessToken: access.token,
+      expiresUtc: access.expires.toISOString(),
+      refreshToken: refresh.token,
+      refreshExpiresUtc: refresh.session.expiresUtc.toISOString(),
+      tokenType: 'Bearer',
+    };
+  }
   private async verifyBackendAccessToken(token: string): Promise<AuthenticatedUser> {
     const { payload } = await jwtVerify(token, this.key);
     if (!payload.sub) throw new UnauthorizedError();
@@ -71,11 +89,7 @@ export class AuthService {
     try {
       const decoded = await this.auth.verifyIdToken(token, true);
       const existing = await this.users.get(decoded.uid);
-      if (
-        existing?.status === 'Disabled' ||
-        existing?.status === 'Suspended' ||
-        existing?.status === 'Deleted'
-      ) {
+      if (this.isDisabledStatus(existing?.status)) {
         throw new ForbiddenError('The authenticated account is not active.');
       }
       const synced = await this.users.upsert({
@@ -182,8 +196,7 @@ export class AuthService {
     if (normalize(decoded.email ?? '') !== normalize(input.email))
       throw new UnauthorizedError('Token email does not match submitted email.');
     if (!decoded.email_verified) throw new UnauthorizedError('Email verification is required.');
-    const permissions = (decoded.permission as string[]) ??
-      (decoded.permissions as string[]) ?? ['scholar:access'];
+    const permissions = this.tokenPermissions(decoded);
     await this.users.upsert({
       uid: decoded.uid,
       email: normalize(decoded.email!),
@@ -193,16 +206,50 @@ export class AuthService {
       administrativeMfaRequired: false,
       permissions,
     });
-    const access = await this.signAccessToken(decoded.uid, decoded.email, permissions);
-    const refresh = await this.sessions.create(decoded.uid, this.env.REFRESH_TOKEN_TTL_DAYS);
-    return {
-      accessToken: access.token,
-      expiresUtc: access.expires.toISOString(),
-      refreshToken: refresh.token,
-      refreshExpiresUtc: refresh.session.expiresUtc.toISOString(),
-      tokenType: 'Bearer',
-    };
+    return this.issueBackendTokens(decoded.uid, decoded.email, permissions);
   }
+  async resyncFirebaseEmailVerification(input: { firebaseIdToken: string }) {
+    const decoded = await this.auth.verifyIdToken(input.firebaseIdToken, true).catch(() => {
+      throw new UnauthorizedError('Invalid Firebase ID token.');
+    });
+    if (!decoded.email_verified) throw new ForbiddenError('Firebase email is not verified.');
+
+    const firebaseUser = await this.auth.getUser(decoded.uid).catch(() => {
+      throw new UnauthorizedError('Invalid Firebase user.');
+    });
+    if (firebaseUser.disabled) throw new ForbiddenError('The authenticated account is not active.');
+    if (!firebaseUser.emailVerified && !decoded.email_verified) {
+      throw new ForbiddenError('Firebase email is not verified.');
+    }
+
+    const existing = await this.users.get(decoded.uid);
+    if (this.isDisabledStatus(existing?.status)) {
+      throw new ForbiddenError('The authenticated account is not active.');
+    }
+
+    const permissions = this.tokenPermissions(decoded, existing?.permissions ?? ['scholar:access']);
+    const synced = await this.users.upsert({
+      uid: decoded.uid,
+      email: normalize(decoded.email ?? existing?.email ?? firebaseUser.email ?? ''),
+      emailNormalized: normalize(decoded.email ?? existing?.email ?? firebaseUser.email ?? ''),
+      displayName:
+        (decoded.name as string) ?? existing?.displayName ?? firebaseUser.displayName ?? '',
+      photoUrl: (decoded.picture as string) ?? existing?.photoUrl ?? firebaseUser.photoURL ?? null,
+      authProvider: decoded.firebase?.sign_in_provider ?? existing?.authProvider ?? 'firebase',
+      emailVerified: true,
+      status: existing?.status ?? 'Active',
+      roles: existing?.roles ?? ['Scholar'],
+      permissions,
+      cohortIds: existing?.cohortIds ?? [],
+      activeCohortId: existing?.activeCohortId ?? null,
+      mfaEnabled: existing?.mfaEnabled ?? false,
+      administrativeMfaRequired: existing?.administrativeMfaRequired ?? false,
+      lastLoginAt: new Date(),
+    });
+    await this.auth.setCustomUserClaims(decoded.uid, this.claims(synced.permissions, true));
+    return this.issueBackendTokens(decoded.uid, synced.email, synced.permissions);
+  }
+
   async refresh(refreshToken: string) {
     const rotated = await this.sessions.rotate(refreshToken, this.env.REFRESH_TOKEN_TTL_DAYS);
     if (rotated.status === 'reuse' && rotated.session)
@@ -221,9 +268,13 @@ export class AuthService {
     };
   }
   async forgotPassword(email: string) {
-    const resetLink = await this.auth.generatePasswordResetLink(normalize(email), {
-      url: this.env.FIREBASE_ACTION_CODE_URL,
-    });
-    return this.env.NODE_ENV === 'production' ? {} : { resetLink };
+    try {
+      const resetLink = await this.auth.generatePasswordResetLink(normalize(email), {
+        url: this.env.FIREBASE_ACTION_CODE_URL,
+      });
+      return this.env.NODE_ENV === 'production' ? {} : { resetLink };
+    } catch {
+      return {};
+    }
   }
 }

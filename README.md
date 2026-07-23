@@ -30,7 +30,7 @@ npm run build
 
 ## Authentication flow
 
-Clients sign in with the Firebase Client SDK, then submit the Firebase ID token to `POST /api/v1/auth/login`. The backend verifies that token with Firebase Admin, requires verified email, syncs the Firestore user profile, and issues a backend JWT plus a secure opaque refresh token. Refresh tokens are stored only as SHA-256 hashes in `/refreshSessions` and rotate on every use. Reuse of a revoked refresh token revokes active sessions for that user.
+Clients sign in with the Firebase Client SDK, then submit the Firebase ID token to `POST /api/v1/auth/login`. The backend verifies that token with Firebase Admin, requires verified email, syncs the Firestore user profile, and issues a backend JWT plus a secure opaque refresh token. After a learner verifies email in Firebase, clients can force-refresh the Firebase ID token and call `POST /api/v1/auth/firebase/resync` to synchronize local `emailVerified` state and receive the same backend token DTO. Refresh tokens are stored only as SHA-256 hashes in `/refreshSessions` and rotate on every use. Reuse of a revoked refresh token revokes active sessions for that user.
 
 ## Migration notes from .NET 8
 

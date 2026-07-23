@@ -293,6 +293,27 @@ describe('MindUnlocking API', () => {
     });
     expect(await users.get('u')).toMatchObject({ email: 'a@example.com' });
   });
+  it('resyncs verified Firebase email state and issues backend tokens', async () => {
+    const result = await svc.resyncFirebaseEmailVerification({
+      firebaseIdToken: token({
+        uid: 'u',
+        email: 'a@example.com',
+        email_verified: true,
+        permission: ['scholar:access'],
+      }),
+    });
+    expect(result).toMatchObject({ tokenType: 'Bearer' });
+    expect(result.accessToken).toBeTruthy();
+    expect(result.refreshToken).toBeTruthy();
+    expect(await users.get('u')).toMatchObject({ email: 'a@example.com', emailVerified: true });
+  });
+  it('rejects resync when Firebase email remains unverified', async () => {
+    await expect(
+      svc.resyncFirebaseEmailVerification({
+        firebaseIdToken: token({ uid: 'u', email: 'a@example.com', email_verified: false }),
+      }),
+    ).rejects.toThrow('Firebase email is not verified');
+  });
   it('rotates refresh tokens and detects reuse', async () => {
     await users.upsert({
       uid: 'u',
@@ -311,6 +332,37 @@ describe('MindUnlocking API', () => {
   it('logout revokes active sessions', async () => {
     await sessions.create('u', 14);
     expect(await sessions.revokeActiveForUser('u', 'logout')).toBe(1);
+  });
+  it('forgot password route returns neutral no-content response', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+    });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/forgot-password',
+      payload: { email: 'unknown@example.com' },
+    });
+    expect(r.statusCode).toBe(204);
+    expect(r.body).toBe('');
+  });
+
+  it('firebase resync route returns backend token dto', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+    });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/firebase/resync',
+      payload: {
+        firebaseIdToken: token({ uid: 'u', email: 'a@example.com', email_verified: true }),
+      },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ tokenType: 'Bearer' });
   });
 
   it('serves seeded frontend learning endpoints', async () => {
