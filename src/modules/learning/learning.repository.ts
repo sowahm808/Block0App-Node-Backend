@@ -13,6 +13,7 @@ import {
   sampleReadiness,
   sampleReadinessPrompts,
   sampleContentReviews,
+  sampleRewards,
   sampleResources,
   sampleTeams,
 } from './learning.seed.js';
@@ -139,6 +140,12 @@ export class LearningRepository {
     const snapshot = await this.db.collection('teams').get();
     const teams = snapshot.docs.map((doc) => doc.data());
     return teams.length ? teams : sampleTeams;
+  }
+
+  async listRewards() {
+    const snapshot = await this.db.collection('rewards').where('status', '==', 'active').get();
+    const rewards = snapshot.docs.map((doc) => doc.data());
+    return rewards.length ? rewards : sampleRewards;
   }
 
   async listLearningPacks() {

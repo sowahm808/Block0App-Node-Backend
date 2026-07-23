@@ -119,6 +119,8 @@ export async function buildApp(overrides?: any) {
           listTeams: async () => (await import('./modules/learning/learning.seed.js')).sampleTeams,
           listLearningPacks: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleLearningPacks,
+          listRewards: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleRewards,
           listReviewContent: async () => {
             const seed = await import('./modules/learning/learning.seed.js');
             return seed.sampleContentReviews.map((review) => {
@@ -251,6 +253,7 @@ export async function buildApp(overrides?: any) {
       scenarios: '/api/v1/scenarios',
       teams: '/api/v1/teams',
       learningPacks: '/api/v1/learning-packs',
+      rewards: '/api/v1/rewards',
       dashboard: '/api/v1/dashboard',
       profile: '/api/v1/profile',
     },
