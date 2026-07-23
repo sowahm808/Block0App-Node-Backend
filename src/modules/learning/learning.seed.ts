@@ -291,6 +291,33 @@ export const sampleRewards = [
   },
 ];
 
+
+export const sampleCertificates = [
+  {
+    id: 'certificate-block-zero-foundations-seed-scholar',
+    userId: 'seed-scholar',
+    title: 'Block Zero Foundations Certificate',
+    description: 'Awarded for completing the foundational medical exam preparation sprint.',
+    challengeId: 'block-zero-21-day-medical-exam-prep',
+    issuedAtUtc: '2026-01-21T00:00:00.000Z',
+    credentialUrl: null,
+    status: 'issued',
+  },
+];
+
+export const sampleRaffleEntries = [
+  {
+    id: 'raffle-entry-daily-check-in-seed-scholar',
+    userId: 'seed-scholar',
+    raffleId: 'daily-check-in-raffle',
+    source: 'daily-check-in',
+    title: 'Daily Check-in Raffle Entry',
+    entries: 1,
+    earnedAtUtc: '2026-01-01T00:00:00.000Z',
+    status: 'active',
+  },
+];
+
 export const sampleSystemSettings = {
   id: 'default',
   appName: 'MindUnlocking',
@@ -326,5 +353,7 @@ export const learningSeedCollections = {
   readiness: [sampleReadiness],
   readinessPrompts: sampleReadinessPrompts,
   rewards: sampleRewards,
+  certificates: sampleCertificates,
+  raffleEntries: sampleRaffleEntries,
   systemSettings: [sampleSystemSettings],
 };

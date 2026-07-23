@@ -14,6 +14,8 @@ import {
   sampleReadinessPrompts,
   sampleContentReviews,
   sampleRewards,
+  sampleCertificates,
+  sampleRaffleEntries,
   sampleSystemSettings,
   sampleResources,
   sampleTeams,
@@ -147,6 +149,18 @@ export class LearningRepository {
     const snapshot = await this.db.collection('rewards').where('status', '==', 'active').get();
     const rewards = snapshot.docs.map((doc) => doc.data());
     return rewards.length ? rewards : sampleRewards;
+  }
+
+  async listCertificates() {
+    const snapshot = await this.db.collection('certificates').get();
+    const certificates = snapshot.docs.map((doc) => doc.data());
+    return certificates.length ? certificates : sampleCertificates;
+  }
+
+  async listRaffleEntries() {
+    const snapshot = await this.db.collection('raffleEntries').get();
+    const raffleEntries = snapshot.docs.map((doc) => doc.data());
+    return raffleEntries.length ? raffleEntries : sampleRaffleEntries;
   }
 
   async listLearningPacks() {
