@@ -6,10 +6,14 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { LearningRepository } from './learning.repository.js';
 import { checkInSchema } from './check-ins.schemas.js';
 
-type LearningRoutesOptions = { learning: LearningRepository; authService?: AuthService };
+type LearningRoutesOptions = {
+  learning: LearningRepository;
+  authService?: AuthService;
+  users?: { list?: () => Promise<unknown[]> };
+};
 
 export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesOptions) {
-  const { learning, authService } = opts;
+  const { learning, authService, users } = opts;
   const requireAuth = async (request: any) => {
     if (!authService) throw new ForbiddenError('Authentication is not configured');
     await authenticate(authService)(request);
@@ -79,6 +83,12 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/teams', async () => ({ data: await learning.listTeams() }));
 
+  app.get('/mentor/teams', async () => ({ data: await learning.listTeams() }));
+
+  app.get('/mentor/support-requests', async () => ({
+    data: 'listSupportRequests' in learning ? await (learning as any).listSupportRequests() : [],
+  }));
+
   app.get('/learning-packs', async () => ({ data: await learning.listLearningPacks() }));
 
   app.get('/rewards', async () => ({ data: await learning.listRewards() }));
@@ -95,11 +105,25 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/review/dashboard', getDashboard);
 
+  app.get('/review/scenarios', async () => ({
+    data: await learning.listReviewScenarios(),
+  }));
+
+  app.get('/review/ai-drafts', async () => ({
+    data: 'listAiDrafts' in learning ? await (learning as any).listAiDrafts() : [],
+  }));
+
+  app.get('/review/history', async () => ({
+    data: 'listReviewHistory' in learning ? await (learning as any).listReviewHistory() : [],
+  }));
+
   app.get('/review/content', async () => ({ data: await learning.listReviewContent() }));
 
   app.get('/review/questions', async () => ({ data: await learning.listReviewQuestions() }));
 
   app.get('/admin/dashboard', getDashboard);
+
+  app.get('/admin/users', async () => ({ data: users?.list ? await users.list() : [] }));
 
   app.get('/admin/system-settings', async () => ({ data: await learning.getSystemSettings() }));
 

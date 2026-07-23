@@ -160,6 +160,14 @@ export async function buildApp(overrides?: any) {
                 ) ?? null,
             }));
           },
+          listReviewScenarios: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleReviewScenarios,
+          listAiDrafts: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleAiDrafts,
+          listReviewHistory: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleReviewHistory,
+          listSupportRequests: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleSupportRequests,
           getDashboard: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleDashboard,
           getReadiness: async () =>
@@ -278,7 +286,7 @@ export async function buildApp(overrides?: any) {
       v1.get('/profile', profile, async (req) => req.user);
       await v1.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
-      await v1.register(learningRoutes, { learning, authService } as any);
+      await v1.register(learningRoutes, { learning, authService, users } as any);
       await v1.register(notificationsRoutes, {
         prefix: '/notifications',
         notifications,
@@ -292,7 +300,7 @@ export async function buildApp(overrides?: any) {
       api.get('/profile', profile, async (req) => req.user);
       await api.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
-      await api.register(learningRoutes, { learning, authService } as any);
+      await api.register(learningRoutes, { learning, authService, users } as any);
       await api.register(notificationsRoutes, {
         prefix: '/notifications',
         notifications,
@@ -301,6 +309,6 @@ export async function buildApp(overrides?: any) {
     },
     { prefix: '/api' },
   );
-  await app.register(learningRoutes, { learning, authService } as any);
+  await app.register(learningRoutes, { learning, authService, users } as any);
   return app;
 }
