@@ -304,6 +304,17 @@ describe('MindUnlocking API', () => {
       title: 'Medical Exam Foundations',
       content: { id: 'medical-exam-foundations' },
     });
+
+    for (const path of ['/api/v1/review/questions', '/api/review/questions', '/review/questions']) {
+      const reviewQuestions = await app.inject(path);
+      expect(reviewQuestions.statusCode).toBe(200);
+      expect(reviewQuestions.json().data[0]).toMatchObject({
+        id: 'bp-day-01-q001',
+        stem: expect.any(String),
+        choices: expect.any(Array),
+        explanation: { questionId: 'bp-day-01-q001', correctChoiceId: 'A' },
+      });
+    }
   });
 
   it('keeps W1 resume payloads separate from W2/W3 submit feedback', async () => {

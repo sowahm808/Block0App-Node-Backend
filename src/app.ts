@@ -138,6 +138,20 @@ export async function buildApp(overrides?: any) {
               };
             });
           },
+          listReviewQuestions: async () => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            return seed.sampleQuestions.map((question) => ({
+              ...question,
+              review:
+                seed.sampleContentReviews.find(
+                  (review) => review.entityType === 'question' && review.entityId === question.id,
+                ) ?? null,
+              explanation:
+                seed.sampleQuestionExplanations.find(
+                  (explanation) => explanation.questionId === question.id,
+                ) ?? null,
+            }));
+          },
           getDashboard: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleDashboard,
           getReadiness: async () =>
