@@ -123,6 +123,20 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/admin/dashboard', getDashboard);
 
+  app.get('/admin/challenges', async () => ({ data: await learning.listChallenges() }));
+
+  app.get('/admin/cohorts', async () => ({ data: await learning.listTeams() }));
+
+  app.get('/admin/learning-packs', async () => ({ data: await learning.listLearningPacks() }));
+
+  app.get('/admin/content-review', async () => ({ data: await learning.listReviewContent() }));
+
+  app.get('/admin/reports', async () => ({ data: await learning.getDashboard() }));
+
+  app.get('/admin/audit', async () => ({
+    data: 'listReviewHistory' in learning ? await (learning as any).listReviewHistory() : [],
+  }));
+
   app.get('/admin/users', async () => ({ data: users?.list ? await users.list() : [] }));
 
   app.get('/admin/system-settings', async () => ({ data: await learning.getSystemSettings() }));
