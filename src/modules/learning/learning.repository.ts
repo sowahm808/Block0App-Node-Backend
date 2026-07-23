@@ -14,6 +14,7 @@ import {
   sampleReadinessPrompts,
   sampleContentReviews,
   sampleRewards,
+  sampleSystemSettings,
   sampleResources,
   sampleTeams,
 } from './learning.seed.js';
@@ -352,6 +353,14 @@ export class LearningRepository {
   async getReadiness() {
     const snapshot = await this.db.collection('readiness').limit(1).get();
     return snapshot.empty ? sampleReadiness : snapshot.docs[0].data();
+  }
+
+  async getSystemSettings() {
+    const byDefaultId = await this.db.collection('systemSettings').doc('default').get();
+    if (byDefaultId.exists) return byDefaultId.data();
+
+    const snapshot = await this.db.collection('systemSettings').limit(1).get();
+    return snapshot.empty ? sampleSystemSettings : snapshot.docs[0].data();
   }
 
   private async getReviewEntity(entityType: string, entityId: string) {
