@@ -146,8 +146,33 @@ export async function buildApp(overrides?: any) {
             (await import('./modules/learning/learning.seed.js')).sampleRewards,
           listCertificates: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleCertificates,
-          listRaffleEntries: async () =>
-            (await import('./modules/learning/learning.seed.js')).sampleRaffleEntries,
+          listRaffleEntries: async (scholarId?: string) => {
+            const { sampleRaffleEntries } = await import('./modules/learning/learning.seed.js');
+            const entries = scholarId
+              ? sampleRaffleEntries.filter(
+                  (entry: any) => entry.scholarId === scholarId || entry.userId === scholarId,
+                )
+              : sampleRaffleEntries;
+            return {
+              summary: {
+                totalActiveEntries: entries.filter((entry) => entry.status === 'active').length,
+                currentRaffle: entries.length
+                  ? 'July Scholar Momentum Drawing'
+                  : 'No active raffle',
+                drawingDate: '2026-07-31',
+                rulesUrl: '/rewards/raffle-rules',
+              },
+              entries: entries.map((entry) => ({
+                id: entry.id,
+                entryReason: entry.title ?? 'Completed an eligible scholar activity',
+                dateEarned: entry.earnedAtUtc.slice(0, 10),
+                sourceActivity:
+                  entry.source === 'daily-check-in' ? 'Daily Check-in' : 'Capsule Completion',
+                raffleName: 'July Scholar Momentum Drawing',
+                status: entry.status,
+              })),
+            };
+          },
           getSystemSettings: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleSystemSettings,
           listReviewContent: async () => {

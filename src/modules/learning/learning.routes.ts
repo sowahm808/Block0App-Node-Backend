@@ -627,7 +627,9 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/certificates', async () => ({ data: await learning.listCertificates() }));
 
-  app.get('/raffle-entries', async () => ({ data: await learning.listRaffleEntries() }));
+  app.get('/raffle-entries', { preHandler: requireScholarAccess }, async (request) =>
+    learning.listRaffleEntries(request.user!.uid),
+  );
 
   const getScholarDashboard = async (request: any) => ({
     data: await (learning as any).getScholarDashboard(request.user.uid),
