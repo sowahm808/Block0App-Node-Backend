@@ -403,13 +403,38 @@ describe('MindUnlocking API', () => {
     expect(legacyAvailableRehearsals.statusCode).toBe(200);
     expect(legacyAvailableRehearsals.json().data).toEqual(challenges.json().data);
 
-    const currentToday = await app.inject('/api/v1/challenges/current/today');
+    users.data.set('seed-scholar', {
+      uid: 'seed-scholar',
+      email: 'learner@example.com',
+      roles: ['Scholar'],
+      permissions: ['scholar:access'],
+      status: 'Active',
+    });
+    const currentToday = await app.inject({
+      url: '/api/v1/challenges/current/today',
+      headers: {
+        authorization: `Bearer ${token({ uid: 'seed-scholar', email: 'learner@example.com', email_verified: true, permissions: ['scholar:access'] })}`,
+      },
+    });
     expect(currentToday.statusCode).toBe(200);
     expect(currentToday.json().data).toMatchObject({
-      currentDay: 5,
-      totalDays: 21,
-      challenge: { slug: 'block-zero-21-day-medical-exam-prep' },
-      day: { challengeId: 'block-zero-21-day-medical-exam-prep', day: 5 },
+      studyDay: 5,
+      phaseTitle: 'Foundation',
+      dailyTitle: 'Day 5: Foundation Sprint',
+      targetCapsules: 15,
+      targetQuestions: 60,
+      completionPercentage: 42,
+      currentStreak: 5,
+      locked: false,
+      assignedLearningPacks: [
+        {
+          id: 'medical-exam-foundations',
+          packNumber: 1,
+          title: 'Medical Exam Foundations',
+          status: 'Not started',
+          continueUrl: '/learning-packs/medical-exam-foundations',
+        },
+      ],
     });
 
     for (const path of [
@@ -1120,6 +1145,154 @@ describe('MindUnlocking API', () => {
       rewardsEarned: 2,
       raffleEntries: 1,
       recentActivity: ['Capsule completed: ECG Basics'],
+    });
+  });
+
+  it('builds active and locked daily challenge contracts', async () => {
+    const makeRepo = (collections: Record<string, any[]>) => {
+      const db = {
+        collection(name: string) {
+          let rows = collections[name] ?? [];
+          const query = {
+            where(field: string, _operator: string, value: string) {
+              rows = rows.filter((row) => row[field] === value);
+              return query;
+            },
+            limit() {
+              return query;
+            },
+            async get() {
+              return { empty: rows.length === 0, docs: rows.map((row) => ({ data: () => row })) };
+            },
+            doc(id?: string) {
+              return {
+                id: id ?? 'generated-id',
+                async get() {
+                  const row = rows.find((item) => item.id === id);
+                  return { exists: !!row, data: () => row };
+                },
+              };
+            },
+          };
+          return query;
+        },
+      };
+      return new LearningRepository(db as any);
+    };
+
+    const active = await makeRepo({
+      enrollments: [
+        {
+          scholarId: 'scholar-a',
+          status: 'active',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          currentDay: 5,
+          currentStreak: 5,
+        },
+      ],
+      dashboard: [
+        {
+          activeChallengeId: 'block-zero-21-day-medical-exam-prep',
+          currentDay: 5,
+          dailyTarget: 15,
+          dailyQuestionTarget: 60,
+          overallCompletion: 42,
+          teamName: 'Team Delta',
+          teamDailyCompletion: 68,
+          latestEncouragement: 'You are building the habits that make exam day feel familiar.',
+          administrativeAnnouncement: 'Live review starts at 7:00 PM cohort time.',
+          continueUrl: '/capsules/attempt-day-05-pack-12',
+          currentCapsuleUrl: '/capsules/attempt-day-05-pack-12-capsule-03',
+        },
+      ],
+      challengeDays: [
+        {
+          id: 'day-05',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          day: 5,
+          phaseTitle: 'Knowledge Mastery',
+          dailyTitle: 'High-yield cardiovascular foundations',
+          targetStudyMinutes: 90,
+        },
+      ],
+      learningPacks: [
+        {
+          id: 'lp_day_05_12',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          dayNumber: 5,
+          packNumber: 12,
+          title: 'Cardiovascular Pharmacology',
+          topic: 'Antihypertensives and heart failure therapy',
+        },
+      ],
+      capsules: [
+        { id: 'c1', learningPackId: 'lp_day_05_12' },
+        { id: 'c2', learningPackId: 'lp_day_05_12' },
+      ],
+      capsuleAttempts: [
+        { scholarId: 'scholar-a', capsuleId: 'c1', completedAtUtc: '2026-07-24T12:00:00Z' },
+      ],
+    }).getCurrentChallengeToday('scholar-a');
+
+    expect(active).toMatchObject({
+      studyDay: 5,
+      phaseTitle: 'Knowledge Mastery',
+      dailyTitle: 'High-yield cardiovascular foundations',
+      targetCapsules: 15,
+      targetQuestions: 60,
+      targetStudyMinutes: 90,
+      completionPercentage: 42,
+      currentStreak: 5,
+      continueUrl: '/capsules/attempt-day-05-pack-12',
+      currentCapsuleUrl: '/capsules/attempt-day-05-pack-12-capsule-03',
+      locked: false,
+      assignedLearningPacks: [
+        {
+          id: 'lp_day_05_12',
+          packNumber: 12,
+          title: 'Cardiovascular Pharmacology',
+          completedCapsules: 1,
+          status: 'In progress',
+        },
+      ],
+    });
+
+    const releaseAtUtc = new Date(Date.now() + 86400000).toISOString();
+    await expect(
+      makeRepo({
+        enrollments: [
+          {
+            scholarId: 'scholar-a',
+            status: 'active',
+            challengeId: 'block-zero-21-day-medical-exam-prep',
+            currentDay: 5,
+            currentStreak: 4,
+            cohortTimeZone: 'America/New_York',
+          },
+        ],
+        dashboard: [{ activeChallengeId: 'block-zero-21-day-medical-exam-prep', currentDay: 5 }],
+        challengeDays: [
+          {
+            id: 'day-05',
+            challengeId: 'block-zero-21-day-medical-exam-prep',
+            day: 5,
+            phaseTitle: 'Knowledge Mastery',
+            releaseAtUtc,
+          },
+        ],
+      }).getCurrentChallengeToday('scholar-a'),
+    ).resolves.toMatchObject({
+      studyDay: 5,
+      phaseTitle: 'Knowledge Mastery',
+      targetCapsules: 0,
+      targetQuestions: 0,
+      targetStudyMinutes: 0,
+      completionPercentage: 0,
+      currentStreak: 4,
+      locked: true,
+      releaseAtUtc,
+      cohortTimeZone: 'America/New_York',
+      assignedLearningPacks: [],
     });
   });
 

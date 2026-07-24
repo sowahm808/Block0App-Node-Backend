@@ -101,23 +101,41 @@ export async function buildApp(overrides?: any) {
           getCurrentChallengeToday: async () => {
             const seed = await import('./modules/learning/learning.seed.js');
             const dashboard = seed.sampleDashboard;
-            const challenge = seed.sampleChallenges.find(
-              (item) => item.id === dashboard.activeChallengeId,
-            );
+            const dayNumber = Number(dashboard.currentDay) || 1;
             const day = seed.sampleChallengeDays.find(
-              (item) =>
-                item.challengeId === dashboard.activeChallengeId &&
-                item.day === dashboard.currentDay,
+              (item) => item.challengeId === dashboard.activeChallengeId && item.day === dayNumber,
             );
-            return challenge && day
-              ? {
-                  challenge,
-                  day,
-                  currentDay: dashboard.currentDay,
-                  totalDays: challenge.durationDays,
-                  dashboard,
-                }
-              : null;
+            return {
+              studyDay: dayNumber,
+              phaseTitle:
+                dayNumber <= 7 ? 'Foundation' : dayNumber <= 14 ? 'Systems Review' : 'Integration',
+              dailyTitle: day?.title ?? `Day ${dayNumber} Challenge`,
+              encouragementMessage: dashboard.latestEncouragement,
+              administrativeAnnouncement: '',
+              teamProgressMessage: `${dashboard.teamName} is ${dashboard.teamDailyCompletion}% complete for today.`,
+              targetCapsules: dashboard.dailyTarget,
+              targetQuestions: dashboard.dailyQuestionTarget,
+              targetStudyMinutes: day?.estimatedMinutes ?? 0,
+              completionPercentage: dashboard.overallCompletion,
+              currentStreak: dashboard.currentStreak,
+              morningCheckInDone: dashboard.morningCheckInDone,
+              eveningCheckInDone: dashboard.eveningCheckInDone,
+              continueUrl: dashboard.continueUrl,
+              currentCapsuleUrl: dashboard.continueUrl,
+              locked: false,
+              assignedLearningPacks: seed.sampleLearningPacks.map((pack, index) => ({
+                id: pack.id,
+                packNumber: index + 1,
+                title: pack.title,
+                topic: pack.description,
+                capsuleCount: seed.sampleCapsules.filter(
+                  (capsule) => capsule.learningPackId === pack.id,
+                ).length,
+                completedCapsules: 0,
+                status: 'Not started',
+                continueUrl: `/learning-packs/${pack.id}`,
+              })),
+            };
           },
           listResources: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleResources,

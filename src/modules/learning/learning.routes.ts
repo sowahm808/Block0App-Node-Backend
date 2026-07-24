@@ -62,11 +62,23 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/rehearsals/available', listPublishedChallenges);
 
-  app.get('/challenges/current/today', async () => {
-    const current = await learning.getCurrentChallengeToday();
-    if (!current) throw new NotFoundError('Current challenge day not found');
-    return { data: current };
-  });
+  const requireScholarAccess = async (request: any) => {
+    await requireAuth(request);
+    const permissions = request.user?.permissions ?? [];
+    if (!permissions.includes('*') && !permissions.includes('scholar:access')) {
+      throw new ForbiddenError('Scholar access is required');
+    }
+  };
+
+  app.get(
+    '/challenges/current/today',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const current = await learning.getCurrentChallengeToday(request.user?.uid);
+      if (!current) throw new NotFoundError('Current challenge day not found');
+      return { data: current };
+    },
+  );
 
   app.post(
     '/check-ins',
@@ -108,14 +120,6 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   app.get('/certificates', async () => ({ data: await learning.listCertificates() }));
 
   app.get('/raffle-entries', async () => ({ data: await learning.listRaffleEntries() }));
-
-  const requireScholarAccess = async (request: any) => {
-    await requireAuth(request);
-    const permissions = request.user?.permissions ?? [];
-    if (!permissions.includes('*') && !permissions.includes('scholar:access')) {
-      throw new ForbiddenError('Scholar access is required');
-    }
-  };
 
   const getScholarDashboard = async (request: any) => ({
     data: await (learning as any).getScholarDashboard(request.user.uid),

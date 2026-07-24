@@ -113,26 +113,165 @@ export class LearningRepository {
     );
   }
 
-  async getCurrentChallengeToday() {
+  async getCurrentChallengeToday(scholarId?: string) {
     const dashboard = (await this.getDashboard()) as any;
-    const challengeId = dashboard.activeChallengeId;
+    const enrollment = scholarId ? await this.getActiveEnrollment(scholarId) : null;
+    const challengeId = enrollment?.challengeId ?? dashboard.activeChallengeId;
     const challenge = challengeId
       ? await this.getChallenge(challengeId)
       : (await this.listChallenges())[0];
     if (!challenge) return null;
+
     const days = await this.getChallengeDays(challenge.id);
     const dayNumber = Math.min(
-      Math.max(Number(dashboard.currentDay) || 1, 1),
+      Math.max(Number(enrollment?.currentDay ?? dashboard.currentDay) || 1, 1),
       Number(challenge.durationDays) || days.length || 1,
     );
-    const day = days.find((item: any) => item.day === dayNumber) ?? days[0] ?? null;
+    const day = (days.find((item: any) => item.day === dayNumber) ?? days[0] ?? null) as any;
+    const cohortTimeZone =
+      enrollment?.cohortTimeZone ?? enrollment?.timeZone ?? dashboard.cohortTimeZone ?? 'UTC';
+    const releaseAtUtc =
+      day?.releaseAtUtc ?? enrollment?.releaseAtUtc ?? dashboard.releaseAtUtc ?? null;
+    const releaseDate = toDate(releaseAtUtc);
+    const isLocked = !!releaseDate && releaseDate.getTime() > Date.now();
+    const currentStreak = Number(enrollment?.currentStreak ?? dashboard.currentStreak) || 0;
+
+    if (isLocked) {
+      return {
+        studyDay: dayNumber,
+        phaseTitle: day?.phaseTitle ?? dashboard.phaseTitle ?? this.phaseTitleForDay(dayNumber),
+        dailyTitle: day?.lockedTitle ?? `Day ${dayNumber} content pending release`,
+        encouragementMessage:
+          day?.lockedEncouragementMessage ?? 'Today’s plan will unlock on the cohort schedule.',
+        administrativeAnnouncement:
+          day?.lockedAdministrativeAnnouncement ?? 'Check back at the release time below.',
+        teamProgressMessage:
+          day?.lockedTeamProgressMessage ?? 'Team progress starts after release.',
+        targetCapsules: 0,
+        targetQuestions: 0,
+        targetStudyMinutes: 0,
+        completionPercentage: 0,
+        currentStreak,
+        morningCheckInDone: false,
+        eveningCheckInDone: false,
+        assignedLearningPacks: [],
+        locked: true,
+        releaseAtUtc: releaseDate.toISOString(),
+        cohortTimeZone,
+      };
+    }
+
+    const packs = await this.getLearningPacksForDay(challenge.id, dayNumber, dashboard);
+    const checkIns = scholarId ? await this.listScholarDocuments('checkIns', scholarId) : [];
+    const today = new Date().toISOString().slice(0, 10);
+    const todaysCheckIns = checkIns.filter((item: any) =>
+      String(item.createdAtUtc ?? item.date ?? '').startsWith(today),
+    );
+    const morningCheckInDone = todaysCheckIns.some((item: any) => item.type === 'morning');
+    const eveningCheckInDone = todaysCheckIns.some((item: any) => item.type === 'evening');
+    const assignedLearningPacks = await Promise.all(
+      packs.map(async (pack: any, index) => {
+        const capsules = await this.listCapsulesForPack(pack.id);
+        const attempts = scholarId
+          ? await this.listScholarDocuments('capsuleAttempts', scholarId)
+          : sampleCapsuleAttempts;
+        const completedCapsules = capsules.filter((capsule: any) =>
+          attempts.some(
+            (attempt: any) =>
+              attempt.capsuleId === capsule.id &&
+              (attempt.completedAtUtc || attempt.status === 'complete'),
+          ),
+        ).length;
+        const capsuleCount = Number(pack.capsuleCount ?? capsules.length) || 0;
+        return {
+          id: pack.id,
+          packNumber: Number(pack.packNumber ?? pack.dayPackNumber ?? index + 1),
+          title: pack.title,
+          topic: pack.topic ?? pack.description ?? '',
+          capsuleCount,
+          completedCapsules,
+          status:
+            completedCapsules >= capsuleCount && capsuleCount > 0
+              ? 'Complete'
+              : completedCapsules > 0
+                ? 'In progress'
+                : 'Not started',
+          continueUrl: pack.continueUrl ?? `/learning-packs/${pack.id}`,
+        };
+      }),
+    );
+    const targetCapsules = Number(day?.targetCapsules ?? dashboard.dailyTarget) || 0;
+    const targetQuestions = Number(day?.targetQuestions ?? dashboard.dailyQuestionTarget) || 0;
+    const targetStudyMinutes = Number(day?.targetStudyMinutes ?? day?.estimatedMinutes ?? 0) || 0;
+    const completedCapsules = assignedLearningPacks.reduce(
+      (sum, pack) => sum + pack.completedCapsules,
+      0,
+    );
+    const completionPercentage = clampPercentage(
+      dashboard.overallCompletion ??
+        (targetCapsules ? (completedCapsules / targetCapsules) * 100 : 0),
+    );
+
     return {
-      challenge,
-      day,
-      currentDay: dayNumber,
-      totalDays: challenge.durationDays ?? days.length,
-      dashboard,
+      studyDay: dayNumber,
+      phaseTitle: day?.phaseTitle ?? dashboard.phaseTitle ?? this.phaseTitleForDay(dayNumber),
+      dailyTitle: day?.dailyTitle ?? day?.title ?? `Day ${dayNumber} Challenge`,
+      encouragementMessage: day?.encouragementMessage ?? dashboard.latestEncouragement ?? '',
+      administrativeAnnouncement:
+        day?.administrativeAnnouncement ?? dashboard.administrativeAnnouncement ?? '',
+      teamProgressMessage:
+        day?.teamProgressMessage ??
+        `${dashboard.teamName ?? 'Team'} is ${Number(dashboard.teamDailyCompletion) || 0}% complete for today.`,
+      targetCapsules,
+      targetQuestions,
+      targetStudyMinutes,
+      completionPercentage,
+      currentStreak,
+      morningCheckInDone: dashboard.morningCheckInDone ?? morningCheckInDone,
+      eveningCheckInDone: dashboard.eveningCheckInDone ?? eveningCheckInDone,
+      continueUrl:
+        dashboard.continueUrl ?? assignedLearningPacks[0]?.continueUrl ?? '/learning-packs',
+      currentCapsuleUrl: dashboard.currentCapsuleUrl ?? dashboard.continueUrl ?? undefined,
+      locked: false,
+      assignedLearningPacks,
     };
+  }
+
+  private async getLearningPacksForDay(challengeId: string, dayNumber: number, dashboard: any) {
+    const snapshot = await this.db
+      .collection('learningPacks')
+      .where('challengeId', '==', challengeId)
+      .get();
+    const packs = snapshot.docs.map((doc) => doc.data() as any);
+    const matching = packs.filter((pack) => Number(pack.dayNumber ?? pack.studyDay) === dayNumber);
+    if (matching.length) return matching;
+    const seeded = sampleLearningPacks.filter(
+      (pack: any) =>
+        pack.challengeId === challengeId && Number(pack.dayNumber ?? pack.studyDay) === dayNumber,
+    );
+    if (seeded.length) return seeded;
+    return sampleLearningPacks.filter((pack: any) =>
+      (dashboard.assignedLearningPacks ?? []).some(
+        (assigned: any) => assigned.externalId === pack.id || assigned.learningPackId === pack.id,
+      ),
+    );
+  }
+
+  private async listCapsulesForPack(learningPackId: string) {
+    const snapshot = await this.db
+      .collection('capsules')
+      .where('learningPackId', '==', learningPackId)
+      .get();
+    const capsules = snapshot.docs.map((doc) => doc.data() as any);
+    return capsules.length
+      ? capsules
+      : sampleCapsules.filter((capsule: any) => capsule.learningPackId === learningPackId);
+  }
+
+  private phaseTitleForDay(dayNumber: number) {
+    if (dayNumber <= 7) return 'Foundation';
+    if (dayNumber <= 14) return 'Systems Review';
+    return 'Integration';
   }
 
   async getChallengeDays(challengeId: string) {
