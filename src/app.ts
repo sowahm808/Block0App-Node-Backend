@@ -22,6 +22,9 @@ import { notificationsRoutes } from './modules/notifications/notifications.route
 import { adminRoutes } from './modules/learning/admin.routes.js';
 import { ProfileService } from './modules/profile/profile.service.js';
 import { profileRoutes } from './modules/profile/profile.routes.js';
+import { SettingsRepository } from './modules/settings/settings.repository.js';
+import { SettingsService } from './modules/settings/settings.service.js';
+import { settingsRoutes } from './modules/settings/settings.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -127,6 +130,43 @@ export async function buildApp(overrides?: any) {
           },
         }
       : new NotificationsRepository(getFirebase().db));
+
+  const settingsRepository =
+    overrides?.settingsRepository ??
+    (overrides
+      ? {
+          data: new Map<string, any>(),
+          supportRequests: new Map<string, any>(),
+          async getSettings(userId: string) {
+            return this.data.get(userId) ?? null;
+          },
+          async saveSettings(userId: string, input: any) {
+            const now = new Date().toISOString();
+            const existing = this.data.get(userId) ?? {};
+            const record = {
+              ...input,
+              userId,
+              createdAtUtc: existing.createdAtUtc ?? now,
+              updatedAtUtc: now,
+            };
+            this.data.set(userId, record);
+            return record;
+          },
+          async createAccountSupportRequest(userId: string, input: any) {
+            const id = `asr_test_${this.supportRequests.size + 1}`;
+            const record = {
+              id,
+              userId,
+              ...input,
+              status: 'Open',
+              createdAt: new Date().toISOString(),
+            };
+            this.supportRequests.set(id, record);
+            return record;
+          },
+        }
+      : new SettingsRepository(getFirebase().db));
+  const settingsService = overrides?.settings ?? new SettingsService(settingsRepository as any);
   const learning =
     overrides?.learning ??
     (overrides
@@ -693,6 +733,7 @@ export async function buildApp(overrides?: any) {
       profile: '/api/v1/profile',
       notifications: '/api/v1/notifications',
       notificationPreferences: '/api/v1/notification-preferences',
+      settings: '/api/v1/settings',
     },
   };
   app.get('/api/v1', async () => meta);
@@ -707,6 +748,11 @@ export async function buildApp(overrides?: any) {
         prefix: '/profile',
         authService,
         profile: profileService,
+      } as any);
+      await v1.register(settingsRoutes, {
+        prefix: '/settings',
+        authService,
+        settings: settingsService,
       } as any);
       await v1.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
@@ -734,6 +780,11 @@ export async function buildApp(overrides?: any) {
         authService,
         profile: profileService,
       } as any);
+      await api.register(settingsRoutes, {
+        prefix: '/settings',
+        authService,
+        settings: settingsService,
+      } as any);
       await api.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await api.register(learningRoutes, { learning, authService, users } as any);
@@ -757,6 +808,11 @@ export async function buildApp(overrides?: any) {
     prefix: '/profile',
     authService,
     profile: profileService,
+  } as any);
+  await app.register(settingsRoutes, {
+    prefix: '/settings',
+    authService,
+    settings: settingsService,
   } as any);
   await app.register(learningRoutes, { learning, authService, users } as any);
   return app;

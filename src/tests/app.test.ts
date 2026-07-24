@@ -2255,4 +2255,87 @@ describe('check-in history', () => {
       expect(invalid.statusCode).toBe(400);
     }
   });
+  it('persists authenticated scholar settings and exposes privacy capabilities', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+    });
+    const auth = `Bearer ${token({ uid: 'settings-user', email: 'settings@example.com' })}`;
+
+    const getDefault = await app.inject({
+      method: 'GET',
+      url: '/api/v1/settings',
+      headers: { authorization: auth },
+    });
+    expect(getDefault.statusCode).toBe(200);
+    expect(getDefault.json()).toMatchObject({
+      appearance: { theme: 'System', reducedMotion: false, textSize: 'Standard' },
+      capabilities: { canRequestDataExport: false, canCreateAccountSupportRequest: true },
+    });
+
+    const update = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/settings',
+      headers: { authorization: auth },
+      payload: {
+        appearance: { theme: 'Dark', reducedMotion: true, textSize: 'Large' },
+        accessibility: { highContrast: true },
+        studyPreferences: { defaultDailyGoal: 40, reminderTiming: 'OneHourBefore' },
+      },
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.json()).toMatchObject({
+      appearance: { theme: 'Dark', reducedMotion: true, textSize: 'Large' },
+      accessibility: { highContrast: true, keyboardNavigationHelp: true },
+      studyPreferences: {
+        defaultDailyGoal: 40,
+        preferredStudyTime: 'Evening',
+        reminderTiming: 'OneHourBefore',
+      },
+    });
+  });
+
+  it('validates settings payloads and creates sanitized support requests', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+    });
+    const auth = `Bearer ${token({ uid: 'support-user', email: 'support@example.com' })}`;
+
+    const invalid = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/settings',
+      headers: { authorization: auth },
+      payload: { appearance: { theme: 'Blue' }, studyPreferences: { defaultDailyGoal: 201 } },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/v1/settings/data-use-summary',
+      headers: { authorization: auth },
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().summary).toContain('personalize learning');
+
+    const unsupported = await app.inject({
+      method: 'POST',
+      url: '/api/v1/settings/data-export-requests',
+      headers: { authorization: auth },
+      payload: {},
+    });
+    expect(unsupported.statusCode).toBe(404);
+
+    const support = await app.inject({
+      method: 'POST',
+      url: '/api/v1/settings/account-support-requests',
+      headers: { authorization: auth },
+      payload: { topic: 'AccountAccess', message: '  <help me>  ' },
+    });
+    expect(support.statusCode).toBe(201);
+    expect(support.json()).toMatchObject({ status: 'Open' });
+    expect(support.json().requestId).toMatch(/^asr_/);
+  });
 });
