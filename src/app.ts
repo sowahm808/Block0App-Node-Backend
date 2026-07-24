@@ -309,6 +309,94 @@ export async function buildApp(overrides?: any) {
               rehearsalAvailable: true,
             };
           },
+          rehearsalAttempts: new Map<string, any>(),
+          listAvailableRehearsals: async (scholarId: string) => ({
+            summary: { missedQuestions: 1, markedQuestions: 0, weakTopics: 0, memoryPearlsDue: 1 },
+            sessions: [
+              {
+                id: 'session_core_review',
+                attemptId: `rehearsal-attempt-${scholarId}-core-review`,
+                title: 'Personalized rehearsal review',
+                questionCount: 1,
+                estimatedMinutes: 5,
+                selectionReasons: ['previously_incorrect'],
+                status: 'not_started',
+              },
+            ],
+          }),
+          startRehearsalSession: async function (scholarId: string, sessionId: string) {
+            if (sessionId !== 'session_core_review') return null;
+            const attemptId = `rehearsal-attempt-${scholarId}-core-review`;
+            (this.rehearsalAttempts as Map<string, any>).set(attemptId, {
+              attemptId,
+              scholarId,
+              title: 'Personalized rehearsal review',
+              currentQuestionIndex: 0,
+            });
+            return { attemptId, resumeUrl: `/rehearsal/${attemptId}` };
+          },
+          getRehearsalAttempt: async function (scholarId: string, attemptId: string) {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const attempt = (this.rehearsalAttempts as Map<string, any>).get(attemptId) ?? {
+              attemptId,
+              scholarId,
+              title: 'Personalized rehearsal review',
+              currentQuestionIndex: 0,
+            };
+            if (attempt.scholarId !== scholarId) return 'forbidden';
+            const question = seed.sampleQuestions[0] as any;
+            return {
+              attemptId,
+              title: attempt.title,
+              currentQuestion: 1,
+              totalQuestions: 1,
+              reviewCategoryCounts: { previously_incorrect: 1 },
+              nextQuestion: {
+                attemptId: `rehearsal-question-attempt-${attemptId}-1`,
+                stem: question.stem,
+                choices: question.choices.map((choice: any) => ({
+                  id: choice.id,
+                  label: choice.label,
+                  text: choice.text,
+                })),
+                questionNumber: 1,
+                capsuleProgress: 'Question 1 of 1',
+                markedForReview: false,
+                selectionReasons: ['previously_incorrect'],
+                reviewCategory: 'previously_incorrect',
+                topic: 'General Review',
+              },
+            };
+          },
+          submitRehearsalQuestionAttempt: async (
+            _scholarId: string,
+            attemptId: string,
+            _questionAttemptId: string,
+            body: any,
+          ) => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const explanation = seed.sampleQuestionExplanations[0] as any;
+            return {
+              selectedChoiceId: body.choiceId,
+              correct: explanation.correctChoiceId === body.choiceId,
+              correctChoiceId: explanation.correctChoiceId,
+              correctRationale: explanation.correctRationale,
+              incorrectRationales: explanation.incorrectRationales,
+              reference: explanation.reference,
+              memory: explanation.memory,
+            };
+          },
+          acknowledgeRehearsalMemory: async () => ({ acknowledged: true }),
+          advanceRehearsalAttempt: async () => 'complete',
+          getRehearsalSummary: async (_scholarId: string, attemptId: string) => ({
+            attemptId,
+            completedAtUtc: new Date().toISOString(),
+            questionsReviewed: 1,
+            improvedAnswers: 1,
+            remainingWeakTopics: [],
+            memoryPearlsReviewed: 1,
+            suggestedNextAction: 'View readiness, then continue review on remaining weak topics.',
+          }),
           listReviewScenarios: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleReviewScenarios,
           listAiDrafts: async () =>

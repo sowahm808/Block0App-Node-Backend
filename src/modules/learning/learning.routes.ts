@@ -178,7 +178,121 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/rehearsals', listPublishedChallenges);
 
-  app.get('/rehearsals/available', listPublishedChallenges);
+  app.get(
+    '/rehearsals/available',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) =>
+      (learning as any).listAvailableRehearsals(request.user?.uid ?? 'anonymous-scholar'),
+  );
+
+  app.post(
+    '/rehearsals/:sessionId/start',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { sessionId } = request.params as { sessionId: string };
+      const result = await (learning as any).startRehearsalSession(
+        request.user?.uid ?? 'anonymous-scholar',
+        sessionId,
+      );
+      if (!result) throw new NotFoundError('Rehearsal session not found');
+      return result;
+    },
+  );
+
+  app.get(
+    '/rehearsal-attempts/:attemptId',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const attempt = await (learning as any).getRehearsalAttempt(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+      );
+      if (attempt === 'forbidden')
+        throw new ForbiddenError('Rehearsal attempt belongs to another scholar');
+      if (!attempt) throw new NotFoundError('Rehearsal attempt not found');
+      return attempt;
+    },
+  );
+
+  app.post(
+    '/rehearsal-attempts/:attemptId/questions/:questionAttemptId/submit',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId, questionAttemptId } = request.params as {
+        attemptId: string;
+        questionAttemptId: string;
+      };
+      const result = await (learning as any).submitRehearsalQuestionAttempt(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+        questionAttemptId,
+        request.body ?? {},
+      );
+      if (!result) throw new NotFoundError('Question attempt not found');
+      if (result === 'conflict' || result === 'duplicate')
+        throw new ConflictError('Question attempt cannot be submitted');
+      if (result === 'invalid_choice')
+        throw new ValidationAppError({
+          choiceId: ['Choice does not belong to this question attempt'],
+        });
+      if (result === 'missing_answer')
+        throw new ValidationAppError({ answer: ['At least one answer is required'] });
+      return result;
+    },
+  );
+
+  app.post(
+    '/rehearsal-attempts/:attemptId/questions/:questionAttemptId/memory-pearl/acknowledge',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const { attemptId, questionAttemptId } = request.params as {
+        attemptId: string;
+        questionAttemptId: string;
+      };
+      const result = await (learning as any).acknowledgeRehearsalMemory(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+        questionAttemptId,
+      );
+      if (!result) throw new NotFoundError('Question attempt not found');
+      if (result === 'conflict')
+        throw new ConflictError('Memory cannot be acknowledged before submission');
+      return reply.status(204).send();
+    },
+  );
+
+  app.post(
+    '/rehearsal-attempts/:attemptId/next',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const result = await (learning as any).advanceRehearsalAttempt(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+      );
+      if (!result) throw new NotFoundError('Rehearsal attempt not found');
+      if (result === 'conflict') throw new ConflictError('Rehearsal attempt cannot advance');
+      if (result === 'complete') throw new ConflictError('No rehearsal questions remain');
+      return reply.status(204).send();
+    },
+  );
+
+  app.get(
+    '/rehearsal-attempts/:attemptId/summary',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const summary = await (learning as any).getRehearsalSummary(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+      );
+      if (summary === 'forbidden')
+        throw new ForbiddenError('Rehearsal attempt belongs to another scholar');
+      if (!summary) throw new NotFoundError('Rehearsal summary not found');
+      return summary;
+    },
+  );
 
   app.get(
     '/challenges/current/program',

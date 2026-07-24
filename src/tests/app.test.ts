@@ -423,13 +423,34 @@ describe('MindUnlocking API', () => {
     expect(rehearsals.statusCode).toBe(200);
     expect(rehearsals.json().data).toEqual(challenges.json().data);
 
-    const availableRehearsals = await app.inject('/api/v1/rehearsals/available');
+    const availableRehearsals = await app.inject({
+      url: '/api/v1/rehearsals/available',
+      headers: { authorization: scholarAuthorization },
+    });
     expect(availableRehearsals.statusCode).toBe(200);
-    expect(availableRehearsals.json().data).toEqual(challenges.json().data);
+    expect(availableRehearsals.json()).toMatchObject({
+      summary: {
+        missedQuestions: expect.any(Number),
+        markedQuestions: expect.any(Number),
+        weakTopics: expect.any(Number),
+        memoryPearlsDue: expect.any(Number),
+      },
+      sessions: [
+        {
+          id: 'session_core_review',
+          attemptId: expect.any(String),
+          selectionReasons: expect.arrayContaining(['previously_incorrect']),
+          status: 'not_started',
+        },
+      ],
+    });
 
-    const legacyAvailableRehearsals = await app.inject('/rehearsals/available');
+    const legacyAvailableRehearsals = await app.inject({
+      url: '/rehearsals/available',
+      headers: { authorization: scholarAuthorization },
+    });
     expect(legacyAvailableRehearsals.statusCode).toBe(200);
-    expect(legacyAvailableRehearsals.json().data).toEqual(challenges.json().data);
+    expect(legacyAvailableRehearsals.json().sessions[0].id).toBe('session_core_review');
 
     const currentToday = await app.inject({
       url: '/api/v1/challenges/current/today',
