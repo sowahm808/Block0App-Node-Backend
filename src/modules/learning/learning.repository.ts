@@ -31,6 +31,17 @@ import {
 } from './content-import.js';
 import type { CheckInInput } from './check-ins.schemas.js';
 
+const clampPercentage = (value: unknown, fallback = 0) =>
+  Math.min(Math.max(Math.round(Number(value) || fallback), 0), 100);
+
+const toDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof (value as any).toDate === 'function') return (value as any).toDate();
+  const date = new Date(value as string);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const removeUndefinedProperties = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map((item) => (item === undefined ? null : removeUndefinedProperties(item)));
@@ -390,6 +401,108 @@ export class LearningRepository {
   async getDashboard() {
     const snapshot = await this.db.collection('dashboard').limit(1).get();
     return snapshot.empty ? sampleDashboard : snapshot.docs[0].data();
+  }
+
+  async getScholarDashboard(scholarId: string) {
+    const dashboard = (await this.getDashboard()) as any;
+    const enrollment = await this.getActiveEnrollment(scholarId);
+    if (!enrollment) return { enrollmentState: 'not_enrolled' };
+
+    const now = new Date();
+    const startDate = toDate(enrollment.startDate ?? enrollment.startDateUtc);
+    if (startDate && startDate.getTime() > now.getTime()) {
+      return {
+        enrollmentState: 'not_started',
+        scholarName: enrollment.scholarName ?? dashboard.scholarName ?? null,
+        currentChallenge: enrollment.challengeName ?? dashboard.currentChallenge ?? null,
+        startDate: startDate.toISOString(),
+        countdown: this.formatCountdown(startDate.getTime() - now.getTime()),
+        preparationChecklist:
+          enrollment.preparationChecklist ?? dashboard.preparationChecklist ?? [],
+      };
+    }
+
+    if (['completed', 'complete'].includes(String(enrollment.status).toLowerCase())) {
+      return {
+        enrollmentState: 'completed',
+        scholarName: enrollment.scholarName ?? dashboard.scholarName ?? null,
+        currentChallenge: enrollment.challengeName ?? dashboard.currentChallenge ?? null,
+        completionMessage:
+          enrollment.completionMessage ?? dashboard.completionMessage ?? 'Challenge completed.',
+        certificateStatus: enrollment.certificateStatus ?? dashboard.certificateStatus ?? 'pending',
+        finalReadiness:
+          enrollment.finalReadiness ?? dashboard.finalReadiness ?? dashboard.readinessLevel,
+      };
+    }
+
+    const [checkIns, rewards, raffleEntries, activity] = await Promise.all([
+      this.listScholarDocuments('checkIns', scholarId),
+      this.listScholarDocuments('rewardsEarned', scholarId),
+      this.listScholarDocuments('raffleEntries', scholarId),
+      this.listScholarDocuments('activityFeed', scholarId),
+    ]);
+    const today = now.toISOString().slice(0, 10);
+    const todaysCheckIns = checkIns.filter((item: any) =>
+      String(item.createdAtUtc ?? item.date ?? '').startsWith(today),
+    );
+    const morningCheckInDone = todaysCheckIns.some((item: any) => item.type === 'morning');
+    const eveningCheckInDone = todaysCheckIns.some((item: any) => item.type === 'evening');
+
+    return {
+      ...dashboard,
+      enrollmentState: 'active',
+      scholarName: enrollment.scholarName ?? dashboard.scholarName,
+      currentChallenge: enrollment.challengeName ?? dashboard.currentChallenge,
+      currentDay: enrollment.currentDay ?? dashboard.currentDay,
+      dailyTarget: enrollment.dailyTarget ?? dashboard.dailyTarget ?? 15,
+      dailyQuestionTarget: enrollment.dailyQuestionTarget ?? dashboard.dailyQuestionTarget ?? 60,
+      capsulesCompletedToday:
+        enrollment.capsulesCompletedToday ?? dashboard.capsulesCompletedToday ?? 0,
+      questionsCompletedToday:
+        enrollment.questionsCompletedToday ?? dashboard.questionsCompletedToday ?? 0,
+      overallCompletion: clampPercentage(
+        enrollment.overallCompletion ?? dashboard.overallCompletion,
+      ),
+      completedDays: enrollment.completedDays ?? dashboard.completedDays ?? 0,
+      currentStreak: enrollment.currentStreak ?? dashboard.currentStreak ?? 0,
+      academicScore: clampPercentage(dashboard.academicScore ?? dashboard.knowledgeAccuracy),
+      engagementScore: clampPercentage(dashboard.engagementScore ?? dashboard.scenarioPerformance),
+      readinessLastUpdated: dashboard.readinessLastUpdated ?? new Date().toISOString(),
+      morningCheckInDone: dashboard.morningCheckInDone ?? morningCheckInDone,
+      eveningCheckInDone: dashboard.eveningCheckInDone ?? eveningCheckInDone,
+      rewardsEarned: dashboard.rewardsEarned ?? rewards.length,
+      raffleEntries: dashboard.raffleEntries ?? raffleEntries.length,
+      recentActivity:
+        dashboard.recentActivity ?? activity.map((item: any) => item.message).filter(Boolean),
+    };
+  }
+
+  private async getActiveEnrollment(scholarId: string) {
+    const snapshot = await this.db
+      .collection('enrollments')
+      .where('scholarId', '==', scholarId)
+      .get();
+    const enrollments = snapshot.docs.map((doc) => doc.data() as any);
+    return (
+      enrollments.find((item) =>
+        ['active', 'not_started', 'completed', 'complete'].includes(
+          String(item.status).toLowerCase(),
+        ),
+      ) ?? null
+    );
+  }
+
+  private async listScholarDocuments(collectionName: string, scholarId: string) {
+    const snapshot = await this.db
+      .collection(collectionName)
+      .where('scholarId', '==', scholarId)
+      .get();
+    return snapshot.docs.map((doc) => doc.data());
+  }
+
+  private formatCountdown(milliseconds: number) {
+    const days = Math.max(Math.ceil(milliseconds / 86400000), 0);
+    return { days, label: days === 1 ? '1 day' : `${days} days` };
   }
 
   async getReadiness() {

@@ -109,13 +109,24 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/raffle-entries', async () => ({ data: await learning.listRaffleEntries() }));
 
-  const getDashboard = async () => ({ data: await learning.getDashboard() });
+  const requireScholarAccess = async (request: any) => {
+    await requireAuth(request);
+    const permissions = request.user?.permissions ?? [];
+    if (!permissions.includes('*') && !permissions.includes('scholar:access')) {
+      throw new ForbiddenError('Scholar access is required');
+    }
+  };
 
-  app.get('/dashboard', getDashboard);
+  const getScholarDashboard = async (request: any) => ({
+    data: await (learning as any).getScholarDashboard(request.user.uid),
+  });
+  const getLegacyDashboard = async () => ({ data: await learning.getDashboard() });
 
-  app.get('/mentor/dashboard', getDashboard);
+  app.get('/dashboard', { preHandler: requireScholarAccess }, getScholarDashboard);
 
-  app.get('/review/dashboard', getDashboard);
+  app.get('/mentor/dashboard', getLegacyDashboard);
+
+  app.get('/review/dashboard', getLegacyDashboard);
 
   app.get('/review/scenarios', async () => ({
     data: await learning.listReviewScenarios(),
@@ -133,7 +144,7 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/review/questions', async () => ({ data: await learning.listReviewQuestions() }));
 
-  app.get('/admin/dashboard', getDashboard);
+  app.get('/admin/dashboard', getLegacyDashboard);
 
   app.get('/admin/challenges', async () => ({ data: await learning.listChallenges() }));
 
