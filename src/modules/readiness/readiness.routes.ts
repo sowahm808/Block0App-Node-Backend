@@ -10,6 +10,10 @@ export async function readinessRoutes(
   app.get(
     '/current',
     { preHandler: [authenticate(deps.authService), requirePermission('scholar:access')] },
-    async (req) => deps.readiness.current(req.user!.uid),
+    async (req, reply) => {
+      const readiness = await deps.readiness.current(req.user!.uid);
+      if (!readiness) return reply.status(204).send();
+      return readiness;
+    },
   );
 }
