@@ -32,6 +32,7 @@ import {
   type LearningPackImportPayload,
 } from './content-import.js';
 import type {
+  CheckInHistoryQuery,
   CheckInInput,
   EveningCheckInInput,
   MorningCheckInInput,
@@ -262,6 +263,146 @@ export class LearningRepository {
       questionsCompletedToday: submittedQuestionsToday.length,
       studyTimeRecordedMinutes: studySessionMinutes || capsuleActivityMinutes,
       questionsMarkedForReview: reviewMarkerCount,
+    };
+  }
+
+  async getCheckInHistory(scholarId: string, query: CheckInHistoryQuery = {}) {
+    const [checkIns, capsuleAttempts, studySessions] = await Promise.all([
+      this.listScholarDocuments('checkIns', scholarId),
+      this.listScholarDocuments('capsuleAttempts', scholarId),
+      this.listScholarDocuments('studySessions', scholarId),
+    ]);
+
+    const byDate = new Map<string, any>();
+    const ensureItem = (date: string) => {
+      const existing = byDate.get(date);
+      if (existing) return existing;
+      const item = {
+        id: `checkin_${date.replace(/-/g, '_')}`,
+        date,
+        morningConfidence: null as number | null,
+        eveningConfidence: null as number | null,
+        capsuleGoal: null as string | null,
+        capsulesCompleted: 0,
+        goalResult: 'not_set' as 'completed' | 'partial' | 'missed' | 'not_set',
+        studyMinutes: 0,
+        supportRequested: false,
+      };
+      byDate.set(date, item);
+      return item;
+    };
+    const dateOnly = (value: unknown) => {
+      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+      const date = toDate(value);
+      return date ? date.toISOString().slice(0, 10) : null;
+    };
+    const recordDate = (record: any) =>
+      dateOnly(
+        record.checkInDate ??
+          record.localDate ??
+          record.date ??
+          record.cohortLocalDate ??
+          record.createdAtUtc ??
+          record.updatedAtUtc,
+      );
+    const normalizedGoalResult = (value: unknown) => {
+      const normalized = normalizeFilterValue(value);
+      if (['yes', 'complete', 'completed', 'met'].includes(normalized)) return 'completed';
+      if (['partially', 'partial', 'partly'].includes(normalized)) return 'partial';
+      if (['no', 'missed', 'not_completed', 'incomplete'].includes(normalized)) return 'missed';
+      return 'not_set';
+    };
+
+    for (const checkIn of checkIns as any[]) {
+      const date = recordDate(checkIn);
+      if (!date) continue;
+      const item = ensureItem(date);
+      const kind = normalizeFilterValue(checkIn.kind ?? checkIn.type);
+      const confidence = Number(checkIn.confidence);
+      if (kind === 'morning') {
+        if (confidence >= 1 && confidence <= 10) item.morningConfidence = confidence;
+        item.capsuleGoal = String(
+          checkIn.goalText ??
+            checkIn.capsuleGoal ??
+            checkIn.goal ??
+            item.capsuleGoal ??
+            'Daily capsule goal',
+        );
+        item.supportRequested =
+          item.supportRequested || Boolean(checkIn.needSupport ?? checkIn.supportRequested);
+      } else if (kind === 'evening') {
+        if (confidence >= 1 && confidence <= 10) item.eveningConfidence = confidence;
+        item.goalResult = normalizedGoalResult(
+          checkIn.goalMet ?? checkIn.goalResult ?? checkIn.goalCompletion,
+        );
+        item.supportRequested =
+          item.supportRequested ||
+          Boolean(checkIn.needSupport ?? checkIn.supportRequested) ||
+          Number(checkIn.supportReceivedToday ?? checkIn.supportGivenToday) > 0;
+      }
+    }
+
+    for (const attempt of capsuleAttempts as any[]) {
+      if (!(attempt.completedAtUtc || attempt.completedAt || attempt.status === 'complete'))
+        continue;
+      const date = dateOnly(attempt.completedAtUtc ?? attempt.completedAt ?? attempt.updatedAtUtc);
+      if (!date) continue;
+      ensureItem(date).capsulesCompleted += 1;
+    }
+
+    for (const session of studySessions as any[]) {
+      const date = dateOnly(
+        session.recordedAtUtc ??
+          session.completedAtUtc ??
+          session.startedAtUtc ??
+          session.createdAtUtc,
+      );
+      if (!date) continue;
+      ensureItem(date).studyMinutes +=
+        Number(session.minutes ?? session.durationMinutes) ||
+        Math.floor((Number(session.durationSeconds) || 0) / 60);
+    }
+
+    const items = [...byDate.values()]
+      .filter((item) => !query.startDate || item.date >= query.startDate)
+      .filter((item) => !query.endDate || item.date <= query.endDate)
+      .filter(
+        (item) =>
+          query.minConfidence === undefined ||
+          [item.morningConfidence, item.eveningConfidence].some(
+            (value) => value !== null && value >= query.minConfidence!,
+          ),
+      )
+      .filter(
+        (item) =>
+          query.maxConfidence === undefined ||
+          [item.morningConfidence, item.eveningConfidence].every(
+            (value) => value === null || value <= query.maxConfidence!,
+          ),
+      )
+      .filter((item) => !query.goalCompletion || item.goalResult === query.goalCompletion)
+      .filter(
+        (item) =>
+          query.supportRequested === undefined || item.supportRequested === query.supportRequested,
+      )
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const avg = (values: Array<number | null>) => {
+      const present = values.filter((value): value is number => typeof value === 'number');
+      return present.length
+        ? present.reduce((sum, value) => sum + value, 0) / present.length
+        : null;
+    };
+    const completedCount = items.filter((item) => item.goalResult === 'completed').length;
+    return {
+      items,
+      summary: {
+        totalCheckIns: items.length,
+        averageMorningConfidence: avg(items.map((item) => item.morningConfidence)),
+        averageEveningConfidence: avg(items.map((item) => item.eveningConfidence)),
+        totalStudyMinutes: items.reduce((sum, item) => sum + item.studyMinutes, 0),
+        goalCompletionRate: items.length ? completedCount / items.length : 0,
+      },
     };
   }
 

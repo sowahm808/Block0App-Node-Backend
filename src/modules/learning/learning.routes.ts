@@ -9,7 +9,12 @@ import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { LearningRepository } from './learning.repository.js';
-import { checkInSchema, eveningCheckInSchema, morningCheckInSchema } from './check-ins.schemas.js';
+import {
+  checkInHistoryQuerySchema,
+  checkInSchema,
+  eveningCheckInSchema,
+  morningCheckInSchema,
+} from './check-ins.schemas.js';
 
 type LearningRoutesOptions = {
   learning: LearningRepository;
@@ -125,6 +130,11 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
       return reply.status(result.created ? 201 : 200).send(result.data);
     },
   );
+
+  app.get('/check-ins/history', { preHandler: requireScholarAccess }, async (request) => {
+    const query = checkInHistoryQuerySchema.parse(request.query);
+    return (learning as any).getCheckInHistory(request.user!.uid, query);
+  });
 
   app.get('/check-ins/evening/summary', { preHandler: requireScholarAccess }, async (request) => ({
     data: await (learning as any).getEveningCheckInSummary(request.user!.uid),

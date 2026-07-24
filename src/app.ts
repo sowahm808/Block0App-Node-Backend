@@ -234,6 +234,16 @@ export async function buildApp(overrides?: any) {
               },
             };
           },
+          getCheckInHistory: async () => ({
+            items: [],
+            summary: {
+              totalCheckIns: 0,
+              averageMorningConfidence: null,
+              averageEveningConfidence: null,
+              totalStudyMinutes: 0,
+              goalCompletionRate: 0,
+            },
+          }),
           getEveningCheckInSummary: async () => ({
             capsulesCompletedToday: 3,
             questionsCompletedToday: 42,
