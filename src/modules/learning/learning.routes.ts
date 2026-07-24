@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
   NotFoundError,
@@ -8,6 +9,7 @@ import {
 import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from 'zod';
 import type { LearningRepository } from './learning.repository.js';
 import {
   checkInHistoryQuerySchema,
@@ -66,6 +68,132 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     if (!permissions.includes('*') && !permissions.includes('scholar:access')) {
       throw new ForbiddenError('Scholar access is required');
     }
+  };
+
+  const sensitiveContentPattern =
+    /\b(answer|answer selection|score|percentage|ranking|rank|confidence|weakness|missed objective|remediation|mentor note|private support|support description)\b/i;
+
+  const rejectSensitivePayload = (input: Record<string, unknown>) => {
+    const flaggedFields = Object.entries(input)
+      .filter(([, value]) => typeof value === 'string' && sensitiveContentPattern.test(value))
+      .map(([key]) => key);
+    if (flaggedFields.length) {
+      throw new ValidationAppError(
+        flaggedFields.map((field) => ({
+          path: [field],
+          message: 'Please keep teammate messages privacy-safe and focused on encouragement.',
+        })),
+      );
+    }
+  };
+
+  const teamActionSchemas = {
+    encouragement: z
+      .object({
+        messageTemplate: z.string().trim().min(1).max(120),
+        optionalNote: z.string().trim().max(500).optional(),
+      })
+      .strict(),
+    checkIn: z
+      .object({
+        message: z.string().trim().min(1).max(500),
+      })
+      .strict(),
+    celebration: z
+      .object({
+        achievement: z.string().trim().min(1).max(120),
+        optionalMessage: z.string().trim().max(500).optional(),
+      })
+      .strict(),
+  };
+
+  const supportRequestSchema = z
+    .object({
+      category: z.enum([
+        'Academic',
+        'Technical',
+        'Motivation',
+        'Time management',
+        'Challenge access',
+        'Personal',
+        'Other',
+      ]),
+      subject: z.string().trim().min(1).max(160),
+      description: z.string().trim().min(1).max(4000),
+      urgency: z.enum(['Low', 'Normal', 'High']),
+      preferredResponseMethod: z.string().trim().max(120).optional(),
+      allowMentorContact: z.boolean().optional(),
+    })
+    .strict();
+
+  const participationValues = new Set(['Active today', 'Recently active', 'Needs check-in']);
+  const helpRequestValues = new Set(['Help requested', 'No help request', 'Hidden']);
+
+  const sanitizeTeamDashboard = (source: any, viewer: any) => {
+    const teams = Array.isArray(source)
+      ? source
+      : source?.items
+        ? source.items
+        : [source].filter(Boolean);
+    const team =
+      teams.find((item: any) =>
+        Array.isArray(item?.members)
+          ? item.members.some((member: any) =>
+              [member.id, member.uid, member.userId].includes(viewer?.uid),
+            )
+          : true,
+      ) ??
+      teams[0] ??
+      {};
+    const members = Array.isArray(team.members) ? team.members : [];
+    const canSeeHelp = (member: any) =>
+      member.id === viewer?.uid ||
+      member.uid === viewer?.uid ||
+      member.userId === viewer?.uid ||
+      viewer?.permissions?.includes('*') ||
+      viewer?.permissions?.includes('team:help-request:view') ||
+      viewer?.roles?.includes('Mentor');
+
+    return {
+      teamName: team.teamName ?? team.name ?? 'Your team',
+      cohort: team.cohort ?? team.cohortName ?? 'Current cohort',
+      mentor: team.mentor ?? team.mentorName ?? null,
+      progress: team.progress ?? 'On track',
+      membersActiveToday:
+        team.membersActiveToday ??
+        `${members.filter((m: any) => m.completedToday || m.activeToday).length} active today`,
+      teamTargetCompleted:
+        team.teamTargetCompleted ??
+        (team.completionPercentage != null
+          ? `${team.completionPercentage}% complete`
+          : '0% complete'),
+      totalStreakDays:
+        team.totalStreakDays ??
+        `${members.reduce((sum: number, m: any) => sum + (Number(m.studyStreak ?? m.streakDays) || 0), 0)} days`,
+      encouragementActivity: team.encouragementActivity ?? '0 encouragements this week',
+      members: members.map((member: any) => {
+        const helpRequest = canSeeHelp(member)
+          ? helpRequestValues.has(member.helpRequest)
+            ? member.helpRequest
+            : member.helpRequested
+              ? 'Help requested'
+              : 'No help request'
+          : 'Hidden';
+        return {
+          id: member.id ?? member.uid ?? member.userId,
+          displayName: member.displayName ?? member.name ?? 'Team member',
+          avatarUrl: member.avatarUrl ?? member.photoUrl ?? null,
+          completedToday: Boolean(member.completedToday),
+          studyStreak: Number(member.studyStreak ?? member.streakDays ?? 0),
+          participation: participationValues.has(member.participation)
+            ? member.participation
+            : member.completedToday || member.activeToday
+              ? 'Active today'
+              : 'Recently active',
+          helpRequest,
+        };
+      }),
+    };
   };
 
   const listPublishedChallenges = async () => ({ data: await learning.listChallenges() });
@@ -380,7 +508,96 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/resources', async () => ({ data: await learning.listResources() }));
 
-  app.get('/teams', async () => ({ data: await learning.listTeams() }));
+  app.get(
+    '/teams',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => sanitizeTeamDashboard(await learning.listTeams(), request.user),
+  );
+
+  app.post(
+    '/teams/members/:memberId/encouragements',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const input = teamActionSchemas.encouragement.parse(request.body ?? {});
+      rejectSensitivePayload(input);
+      const { memberId } = request.params as { memberId: string };
+      const action = await (learning as any).createTeamMemberAction?.(
+        request.user?.uid ?? 'anonymous-scholar',
+        memberId,
+        'encouragement',
+        input,
+      );
+      return reply.status(201).send(action ?? { type: 'encouragement', memberId, ...input });
+    },
+  );
+
+  app.post(
+    '/teams/members/:memberId/check-ins',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const input = teamActionSchemas.checkIn.parse(request.body ?? {});
+      rejectSensitivePayload(input);
+      const { memberId } = request.params as { memberId: string };
+      const action = await (learning as any).createTeamMemberAction?.(
+        request.user?.uid ?? 'anonymous-scholar',
+        memberId,
+        'check-in',
+        input,
+      );
+      return reply.status(201).send(action ?? { type: 'check-in', memberId, ...input });
+    },
+  );
+
+  app.post(
+    '/teams/members/:memberId/celebrations',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const input = teamActionSchemas.celebration.parse(request.body ?? {});
+      rejectSensitivePayload(input);
+      const { memberId } = request.params as { memberId: string };
+      const action = await (learning as any).createTeamMemberAction?.(
+        request.user?.uid ?? 'anonymous-scholar',
+        memberId,
+        'celebration',
+        input,
+      );
+      return reply.status(201).send(action ?? { type: 'celebration', memberId, ...input });
+    },
+  );
+
+  app.post(
+    '/support-requests',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const input = supportRequestSchema.parse(request.body ?? {});
+      rejectSensitivePayload({ subject: input.subject, description: input.description });
+      const created = await (learning as any).createSupportRequest?.(
+        request.user?.uid ?? 'anonymous-scholar',
+        input,
+      );
+      return reply
+        .status(201)
+        .send(
+          created ?? {
+            id: crypto.randomUUID(),
+            ...input,
+            status: 'Submitted',
+            submittedDate: new Date().toISOString(),
+          },
+        );
+    },
+  );
+
+  app.get(
+    '/support-requests/mine',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => ({
+      items:
+        'listMySupportRequests' in learning
+          ? await (learning as any).listMySupportRequests(request.user?.uid ?? 'anonymous-scholar')
+          : [],
+    }),
+  );
 
   app.get('/mentor/teams', async () => ({ data: await learning.listTeams() }));
 

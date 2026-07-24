@@ -2502,6 +2502,78 @@ export class LearningRepository {
     return requests.length ? requests : sampleSupportRequests;
   }
 
+  async createTeamMemberAction(
+    actorId: string,
+    memberId: string,
+    type: 'encouragement' | 'check-in' | 'celebration',
+    input: Record<string, unknown>,
+  ) {
+    const now = new Date().toISOString();
+    const ref = this.db.collection('teamMemberActions').doc();
+    const action = removeUndefinedProperties({
+      id: ref.id,
+      actorId,
+      memberId,
+      type,
+      ...input,
+      createdAtUtc: now,
+      updatedAtUtc: now,
+    });
+    await ref.set(action as Record<string, unknown>);
+    return action;
+  }
+
+  async createSupportRequest(scholarId: string, input: Record<string, unknown>) {
+    const now = new Date().toISOString();
+    const ref = this.db.collection('supportRequests').doc();
+    const supportRequest = removeUndefinedProperties({
+      id: ref.id,
+      scholarId,
+      requesterId: scholarId,
+      ...input,
+      status: 'Submitted',
+      submittedDate: now,
+      lastUpdate: now,
+      createdAtUtc: now,
+      updatedAtUtc: now,
+    });
+    await ref.set(supportRequest as Record<string, unknown>);
+    return supportRequest;
+  }
+
+  async listMySupportRequests(scholarId: string) {
+    const snapshot = await this.db
+      .collection('supportRequests')
+      .where('scholarId', '==', scholarId)
+      .get();
+    return snapshot.docs.map((doc) => {
+      const data = doc.data() as any;
+      const submittedDate = data.submittedDate ?? data.createdAtUtc ?? data.createdUtc;
+      const lastUpdate = data.lastUpdate ?? data.updatedAtUtc ?? submittedDate;
+      const status = [
+        'Submitted',
+        'Assigned',
+        'In Progress',
+        'Waiting for Scholar',
+        'Resolved',
+        'Closed',
+      ].includes(data.status)
+        ? data.status
+        : data.status === 'open'
+          ? 'Submitted'
+          : 'Submitted';
+      return removeUndefinedProperties({
+        id: data.id ?? doc.id,
+        subject: data.subject,
+        category: data.category,
+        submittedDate,
+        status,
+        assignedMentor: data.assignedMentor ?? data.mentorName,
+        lastUpdate,
+      });
+    });
+  }
+
   async getDashboard() {
     const snapshot = await this.db.collection('dashboard').limit(1).get();
     return snapshot.empty ? sampleDashboard : snapshot.docs[0].data();

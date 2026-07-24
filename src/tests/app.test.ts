@@ -480,7 +480,6 @@ describe('MindUnlocking API', () => {
     });
 
     for (const path of [
-      '/teams',
       '/mentor/teams',
       '/mentor/support-requests',
       '/admin/challenges',
@@ -505,6 +504,40 @@ describe('MindUnlocking API', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const teams = await app.inject({
+      url: '/api/v1/teams',
+      headers: { authorization: scholarAuthorization },
+    });
+    expect(teams.statusCode).toBe(200);
+    expect(teams.json()).toMatchObject({
+      teamName: 'Foundations Cohort',
+      progress: 'On track',
+      members: [],
+    });
+
+    const supportRequest = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support-requests',
+      headers: { authorization: scholarAuthorization },
+      payload: {
+        category: 'Technical',
+        subject: 'Need help opening today challenge',
+        description: 'The challenge page does not load for me.',
+        urgency: 'Normal',
+        allowMentorContact: true,
+      },
+    });
+    expect(supportRequest.statusCode).toBe(201);
+    expect(supportRequest.json()).toMatchObject({ status: 'Submitted', category: 'Technical' });
+
+    const unsafeEncouragement = await app.inject({
+      method: 'POST',
+      url: '/api/v1/teams/members/teammate-1/encouragements',
+      headers: { authorization: scholarAuthorization },
+      payload: { messageTemplate: 'Your score was low' },
+    });
+    expect(unsafeEncouragement.statusCode).toBe(400);
 
     const learningPacks = await app.inject({
       url: '/api/v1/learning-packs',
