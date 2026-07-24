@@ -24,9 +24,13 @@ export function problemDetails(error: Error, request: FastifyRequest) {
     detail:
       app?.message ??
       (isValidation ? 'Request validation failed' : (e.message ?? 'An unexpected error occurred.')),
+    message:
+      app?.message ??
+      (isValidation ? 'Request validation failed' : (e.message ?? 'An unexpected error occurred.')),
     traceId: request.id,
-    ...(app?.errors ? { errors: app.errors } : {}),
-    ...(validationErrors ? { errors: validationErrors } : {}),
+    correlationId: request.id,
+    ...(app?.errors ? { errors: app.errors, validationErrors: app.errors } : {}),
+    ...(validationErrors ? { errors: validationErrors, validationErrors } : {}),
   };
 }
 export async function errorHandler(
