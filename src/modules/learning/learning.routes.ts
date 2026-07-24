@@ -123,7 +123,11 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     data: 'listSupportRequests' in learning ? await (learning as any).listSupportRequests() : [],
   }));
 
-  app.get('/learning-packs', async () => ({ data: await learning.listLearningPacks() }));
+  app.get(
+    '/learning-packs',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => learning.listLearningPacks(request.user?.uid, request.query as any),
+  );
 
   app.get('/rewards', async () => ({ data: await learning.listRewards() }));
 
