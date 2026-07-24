@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { authenticate } from '../common/auth-middleware.js';
+import { authenticate, getAccessToken } from '../common/auth-middleware.js';
 import { authRateLimit } from '../common/rate-limit.js';
 import {
   registerSchema,
@@ -63,9 +63,11 @@ export async function authRoutes(
     }),
   );
   app.post('/sync', { preHandler: auth }, async (req) => req.user);
-  app.post('/logout', { preHandler: auth }, async (req) => ({
-    revoked: await deps.sessions.revokeActiveForUser(req.user!.uid, 'logout'),
-  }));
+  app.post('/logout', async (req) => {
+    const token = getAccessToken(req);
+    const uid = token ? await deps.authService.verifyLogoutSubject(token) : null;
+    return { revoked: uid ? await deps.sessions.revokeActiveForUser(uid, 'logout') : 0 };
+  });
   app.post(
     '/revoke',
     { preHandler: auth, schema: { body: zodToJsonSchema(revokeSchema) } },

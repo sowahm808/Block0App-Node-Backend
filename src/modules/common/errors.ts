@@ -19,6 +19,13 @@ export class ForbiddenError extends AppError {
     super(403, 'Forbidden', message, 'forbidden');
   }
 }
+export class AccountDisabledError extends AppError {
+  constructor(
+    message = 'This account cannot access Block Zero right now. Contact support for help.',
+  ) {
+    super(423, 'Account access restricted', message, 'account_disabled');
+  }
+}
 export class ConflictError extends AppError {
   constructor(message = 'Conflict') {
     super(409, 'Conflict', message, 'conflict');

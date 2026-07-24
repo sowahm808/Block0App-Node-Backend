@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { UnauthorizedError } from './errors.js';
+import { AccountDisabledError, UnauthorizedError } from './errors.js';
 import type { AuthService } from '../auth/auth.service.js';
 
 const bearerPrefix = /^Bearer\s+/i;
@@ -44,7 +44,8 @@ export const getAccessToken = (req: FastifyRequest): string | null => {
 export const authenticate = (authService: AuthService) => async (req: FastifyRequest) => {
   const token = getAccessToken(req);
   if (!token) throw new UnauthorizedError();
-  req.user = await authService.verifyAccessToken(token).catch(() => {
+  req.user = await authService.verifyAccessToken(token).catch((error) => {
+    if (error instanceof AccountDisabledError) throw error;
     throw new UnauthorizedError();
   });
 };

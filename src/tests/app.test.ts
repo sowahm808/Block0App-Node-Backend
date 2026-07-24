@@ -293,6 +293,78 @@ describe('MindUnlocking API', () => {
     });
     expect(await users.get('u')).toMatchObject({ email: 'a@example.com' });
   });
+  it('rejects restricted accounts during login without issuing backend tokens', async () => {
+    await users.upsert({
+      uid: 'u',
+      email: 'a@example.com',
+      displayName: 'A',
+      emailVerified: true,
+      mfaEnabled: false,
+      administrativeMfaRequired: false,
+      permissions: ['scholar:access'],
+      status: 'Suspended',
+      suspensionNotes: 'internal-only investigation details',
+      riskScore: 99,
+    });
+
+    await expect(
+      svc.login({
+        email: 'a@example.com',
+        firebaseIdToken: token({
+          uid: 'u',
+          email: 'a@example.com',
+          email_verified: true,
+          permission: ['scholar:access'],
+        }),
+      }),
+    ).rejects.toThrow('This account cannot access Block Zero right now');
+    expect(sessions.data.size).toBe(0);
+  });
+  it('returns safe Problem Details for restricted API requests and keeps logout available', async () => {
+    await users.upsert({
+      uid: 'u',
+      email: 'a@example.com',
+      displayName: 'A',
+      emailVerified: true,
+      mfaEnabled: false,
+      administrativeMfaRequired: false,
+      permissions: ['scholar:access'],
+      status: 'Locked',
+      adminNotes: 'internal-only moderator comments',
+      abuseSignals: ['internal-only'],
+    });
+    const access = await svc.signAccessToken('u', 'a@example.com', ['scholar:access']);
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+
+    const restricted = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(restricted.statusCode).toBe(423);
+    expect(restricted.json()).toMatchObject({
+      type: 'https://api.blockzero.example/problems/account-disabled',
+      title: 'Account access restricted',
+      status: 423,
+      detail: 'This account cannot access Block Zero right now. Contact support for help.',
+    });
+    expect(JSON.stringify(restricted.json())).not.toContain('internal-only');
+
+    const logout = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(logout.statusCode).toBe(200);
+    expect(logout.json()).toMatchObject({ revoked: 0 });
+  });
   it('resyncs verified Firebase email state and issues backend tokens', async () => {
     const result = await svc.resyncFirebaseEmailVerification({
       firebaseIdToken: token({

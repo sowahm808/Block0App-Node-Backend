@@ -1,6 +1,11 @@
 import { SignJWT, jwtVerify } from 'jose';
 import type { Auth } from 'firebase-admin/auth';
-import { ConflictError, ForbiddenError, UnauthorizedError } from '../common/errors.js';
+import {
+  AccountDisabledError,
+  ConflictError,
+  ForbiddenError,
+  UnauthorizedError,
+} from '../common/errors.js';
 import { UsersRepository } from '../users/users.repository.js';
 import { AuthRepository } from './auth.repository.js';
 import type { Env } from '../../config/env.js';
@@ -51,8 +56,11 @@ export class AuthService {
   private tokenPermissions(decoded: any, fallback: string[] = ['scholar:access']) {
     return (decoded.permission as string[]) ?? (decoded.permissions as string[]) ?? fallback;
   }
-  private isDisabledStatus(status?: string | null) {
-    return status === 'Disabled' || status === 'Suspended' || status === 'Deleted';
+  private isRestrictedStatus(status?: string | null) {
+    return ['Disabled', 'Suspended', 'Deleted', 'Locked', 'Restricted'].includes(status ?? '');
+  }
+  private assertAccountCanAccess(user: { status?: string | null } | null | undefined) {
+    if (this.isRestrictedStatus(user?.status)) throw new AccountDisabledError();
   }
   private async issueBackendTokens(uid: string, email: string | undefined, permissions: string[]) {
     const access = await this.signAccessToken(uid, email, permissions);
@@ -69,7 +77,10 @@ export class AuthService {
     const { payload } = await jwtVerify(token, this.key);
     if (!payload.sub) throw new UnauthorizedError();
     const existing = await this.users.get(payload.sub);
-    if (existing) return this.sanitize(existing);
+    if (existing) {
+      this.assertAccountCanAccess(existing);
+      return this.sanitize(existing);
+    }
     return {
       uid: payload.sub,
       email: payload.email as string | undefined,
@@ -82,16 +93,15 @@ export class AuthService {
   async verifyAccessToken(token: string): Promise<AuthenticatedUser> {
     try {
       return await this.verifyBackendAccessToken(token);
-    } catch {
+    } catch (error) {
+      if (error instanceof AccountDisabledError) throw error;
       // Firebase ID tokens are also accepted for clients that call protected routes
       // before exchanging their Firebase credential through /auth/login.
     }
     try {
       const decoded = await this.auth.verifyIdToken(token, true);
       const existing = await this.users.get(decoded.uid);
-      if (this.isDisabledStatus(existing?.status)) {
-        throw new ForbiddenError('The authenticated account is not active.');
-      }
+      this.assertAccountCanAccess(existing);
       const synced = await this.users.upsert({
         uid: decoded.uid,
         email: normalize(decoded.email ?? existing?.email ?? ''),
@@ -117,6 +127,22 @@ export class AuthService {
       throw new UnauthorizedError('Invalid access token.');
     }
   }
+
+  async verifyLogoutSubject(token: string): Promise<string | null> {
+    try {
+      const { payload } = await jwtVerify(token, this.key);
+      return payload.sub ?? null;
+    } catch {
+      // Firebase ID tokens may be supplied by clients that have not exchanged credentials.
+    }
+    try {
+      const decoded = await this.auth.verifyIdToken(token, false);
+      return decoded.uid ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async register(input: RegisterInput) {
     const email = normalize(input.email);
     const acceptedAt = new Date();
@@ -196,12 +222,16 @@ export class AuthService {
     if (normalize(decoded.email ?? '') !== normalize(input.email))
       throw new UnauthorizedError('Token email does not match submitted email.');
     if (!decoded.email_verified) throw new UnauthorizedError('Email verification is required.');
-    const permissions = this.tokenPermissions(decoded);
+    const existing = await this.users.get(decoded.uid);
+    this.assertAccountCanAccess(existing);
+    const permissions = this.tokenPermissions(decoded, existing?.permissions ?? ['scholar:access']);
     await this.users.upsert({
       uid: decoded.uid,
       email: normalize(decoded.email!),
-      displayName: (decoded.name as string) ?? '',
+      displayName: (decoded.name as string) ?? existing?.displayName ?? '',
       emailVerified: true,
+      status: existing?.status ?? 'Active',
+      roles: existing?.roles ?? ['Scholar'],
       mfaEnabled: false,
       administrativeMfaRequired: false,
       permissions,
@@ -223,9 +253,7 @@ export class AuthService {
     }
 
     const existing = await this.users.get(decoded.uid);
-    if (this.isDisabledStatus(existing?.status)) {
-      throw new ForbiddenError('The authenticated account is not active.');
-    }
+    this.assertAccountCanAccess(existing);
 
     const permissions = this.tokenPermissions(decoded, existing?.permissions ?? ['scholar:access']);
     const synced = await this.users.upsert({
@@ -258,6 +286,7 @@ export class AuthService {
       throw new UnauthorizedError('Invalid, expired, or revoked refresh token.');
     const user = await this.users.get(rotated.session.userId);
     if (!user) throw new UnauthorizedError();
+    this.assertAccountCanAccess(user);
     const access = await this.signAccessToken(user.uid, user.email, user.permissions);
     return {
       accessToken: access.token,
