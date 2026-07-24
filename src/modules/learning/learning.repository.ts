@@ -168,6 +168,63 @@ const SCENARIO_VOLUMES: Record<number, number> = { 15: 10, 16: 20, 17: 40, 18: 6
 
 const isoOrUndefined = (value: unknown) => toDate(value)?.toISOString();
 
+type CertificateRequirement = {
+  id: string;
+  label: string;
+  status: 'complete' | 'incomplete' | 'in_progress';
+  progressCurrent: number;
+  progressTarget: number;
+  eligible: boolean;
+};
+
+const CERTIFICATE_REQUIREMENTS = [
+  { id: 'knowledge_questions', label: 'Required knowledge questions', target: 24 },
+  { id: 'clinical_scenarios', label: 'Required clinical scenarios', target: 4 },
+  { id: 'rehearsal_completion', label: 'Rehearsal completion', target: 1 },
+  { id: 'w3_acknowledgements', label: 'W3 acknowledgements', target: 1 },
+  { id: 'required_check_ins', label: 'Required check-ins', target: 6 },
+  { id: 'final_readiness_check', label: 'Final readiness check', target: 1 },
+] as const;
+
+const normalizeCertificate = (certificate: any) => {
+  if (!certificate) return null;
+  const certificateNumber = String(certificate.certificateNumber ?? certificate.id ?? '');
+  const verificationCode = String(certificate.verificationCode ?? certificate.verificationId ?? '');
+  return {
+    scholarName: String(certificate.scholarName ?? certificate.displayName ?? 'Scholar'),
+    challengeName: String(
+      certificate.challengeName ?? certificate.title ?? 'Block Zero 3-Week CNA Challenge',
+    ),
+    certificateNumber,
+    issueDate: String(
+      certificate.issueDate ??
+        toIsoDate(certificate.issuedAtUtc) ??
+        toIsoDate(certificate.createdAtUtc) ??
+        '',
+    ),
+    verificationCode,
+    status: certificate.status === 'issued' ? 'active' : String(certificate.status ?? 'active'),
+    downloadUrl: certificate.downloadUrl ?? `/certificates/${certificateNumber}/pdf`,
+    verificationUrl: certificate.verificationUrl ?? `/certificate/verify/${verificationCode}`,
+  };
+};
+
+const requirementFromProgress = (
+  definition: (typeof CERTIFICATE_REQUIREMENTS)[number],
+  current: number,
+): CertificateRequirement => {
+  const progressCurrent = Math.max(0, Math.min(Number(current) || 0, definition.target));
+  const eligible = progressCurrent >= definition.target;
+  return {
+    id: definition.id,
+    label: definition.label,
+    status: eligible ? 'complete' : progressCurrent > 0 ? 'in_progress' : 'incomplete',
+    progressCurrent,
+    progressTarget: definition.target,
+    eligible,
+  };
+};
+
 type LearningPackListQuery = {
   search?: string;
   topic?: string;
@@ -3028,6 +3085,144 @@ export class LearningRepository {
     if (dayNumber < currentDay) return 'Missed';
     if (completionPercent > 0) return 'In Progress';
     return 'Available';
+  }
+
+  private async countScholarMatches(
+    collectionName: string,
+    scholarId: string,
+    predicate: (item: any) => boolean,
+  ) {
+    const items = await this.listScholarDocuments(collectionName, scholarId).catch(() => []);
+    return (items as any[]).filter(predicate).length;
+  }
+
+  private async findScholarCertificate(scholarId: string) {
+    const snapshot = await this.db
+      .collection('certificates')
+      .where('scholarId', '==', scholarId)
+      .limit(1)
+      .get();
+    return snapshot.docs[0]?.data() ?? null;
+  }
+
+  async getCertificateStatus(scholarId: string, user: any = {}) {
+    const [
+      existing,
+      knowledge,
+      scenarios,
+      rehearsals,
+      acknowledgements,
+      checkIns,
+      readinessChecks,
+    ] = await Promise.all([
+      this.findScholarCertificate(scholarId),
+      this.countScholarMatches(
+        'questionAttempts',
+        scholarId,
+        (item) => item.submittedAtUtc || item.status === 'submitted' || item.status === 'complete',
+      ),
+      this.countScholarMatches(
+        'scenarioAttempts',
+        scholarId,
+        (item) =>
+          item.submittedAtUtc ||
+          item.completedAtUtc ||
+          ['submitted', 'completed', 'complete'].includes(item.status),
+      ),
+      this.countScholarMatches(
+        'rehearsalAttempts',
+        scholarId,
+        (item) => item.completedAtUtc || item.status === 'complete',
+      ),
+      this.countScholarMatches(
+        'acknowledgements',
+        scholarId,
+        (item) =>
+          item.week === 3 || item.weekNumber === 3 || String(item.type ?? '').includes('w3'),
+      ),
+      this.countScholarMatches(
+        'checkIns',
+        scholarId,
+        (item) => item.status === 'complete' || item.createdAtUtc,
+      ),
+      this.countScholarMatches(
+        'readinessAssessments',
+        scholarId,
+        (item) => item.final === true || item.kind === 'final' || item.completedAtUtc,
+      ),
+    ]);
+
+    const progress: Record<string, number> = {
+      knowledge_questions: knowledge,
+      clinical_scenarios: scenarios,
+      rehearsal_completion: rehearsals,
+      w3_acknowledgements: acknowledgements,
+      required_check_ins: checkIns,
+      final_readiness_check: readinessChecks,
+    };
+    const requirements = CERTIFICATE_REQUIREMENTS.map((definition) =>
+      requirementFromProgress(definition, progress[definition.id] ?? 0),
+    );
+    const eligible = requirements.every((item) => item.eligible);
+    const certificate = normalizeCertificate(existing);
+    return {
+      eligible,
+      generationState: certificate ? 'generated' : eligible ? 'ready' : 'blocked',
+      generationMessage: certificate
+        ? 'Certificate is ready to download.'
+        : eligible
+          ? 'All certificate requirements are complete.'
+          : 'Complete all checklist items to generate your certificate.',
+      requirements,
+      certificate,
+      scholarName: user.displayName ?? user.name ?? undefined,
+    };
+  }
+
+  async generateCertificate(scholarId: string, user: any = {}) {
+    const status = await this.getCertificateStatus(scholarId, user);
+    if (!status.eligible) return 'ineligible' as const;
+    if (status.certificate) return status.certificate;
+    const now = new Date();
+    const issueDate = now.toISOString().slice(0, 10);
+    const suffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const certificateNumber = `B0-${now.getUTCFullYear()}-${suffix}`;
+    const verificationCode = `B0V-${crypto.randomBytes(4).toString('base64url').toUpperCase()}`;
+    const certificate = {
+      id: certificateNumber,
+      scholarId,
+      userId: scholarId,
+      scholarName: user.displayName ?? user.name ?? user.email ?? 'Scholar',
+      challengeName: 'Block Zero 3-Week CNA Challenge',
+      certificateNumber,
+      issueDate,
+      verificationCode,
+      status: 'active',
+      issuedAtUtc: now.toISOString(),
+      pdf: { storagePath: `certificates/${certificateNumber}.pdf`, contentType: 'application/pdf' },
+      downloadUrl: `/certificates/${certificateNumber}/pdf`,
+      verificationUrl: `/certificate/verify/${verificationCode}`,
+    };
+    await this.db
+      .collection('certificates')
+      .doc(certificateNumber)
+      .set(certificate, { merge: false });
+    return normalizeCertificate(certificate);
+  }
+
+  async getCertificateByNumber(certificateNumber: string) {
+    const doc = await this.db.collection('certificates').doc(certificateNumber).get();
+    return doc.exists ? normalizeCertificate(doc.data()) : null;
+  }
+
+  async verifyCertificate(verificationCode: string) {
+    const snapshot = await this.db
+      .collection('certificates')
+      .where('verificationCode', '==', verificationCode)
+      .limit(1)
+      .get();
+    const certificate = normalizeCertificate(snapshot.docs[0]?.data());
+    return certificate ? { valid: certificate.status === 'active', certificate } : null;
   }
 
   async listReadinessPrompts() {
