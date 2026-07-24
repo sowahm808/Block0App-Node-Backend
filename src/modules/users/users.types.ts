@@ -13,6 +13,9 @@ export interface AppUser {
   country?: string | null;
   timeZone?: string | null;
   primaryStudyDevice?: 'phone' | 'tablet' | 'laptop' | 'desktop' | null;
+  preferredStudyTime?: 'EarlyMorning' | 'Morning' | 'Afternoon' | 'Evening' | 'LateNight' | null;
+  activeCohortName?: string | null;
+  enrollmentDate?: Date | null;
   acceptedTerms?: boolean;
   acceptedTermsAt?: Date | null;
   acceptedTermsVersion?: string | null;
