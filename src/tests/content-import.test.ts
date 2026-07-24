@@ -5,6 +5,7 @@ import {
   PdfExtractor,
   parseLearningPackDocument,
 } from '../modules/learning/document-import.js';
+import { LearningPackImportService } from '../modules/learning/import-workflow.js';
 
 const document = `LEARNING PACK
 External ID: pack-1
@@ -111,5 +112,54 @@ describe('PDF extraction', () => {
         buffer: Buffer.from('%PDF-1.4 scanned'),
       }),
     ).rejects.toThrow(/scanned/);
+  });
+});
+
+describe('learning-pack import persistence', () => {
+  it('does not send undefined extraction fields to Firestore', async () => {
+    const updates: Record<string, unknown>[] = [];
+    const records = {
+      create: async () => undefined,
+      update: async (_importId: string, changes: Record<string, unknown>) => {
+        updates.push(changes);
+        return null;
+      },
+    };
+    const savedFiles: string[] = [];
+    const storage = {
+      bucket: () => ({
+        file: (path: string) => ({
+          save: async () => {
+            savedFiles.push(path);
+          },
+        }),
+      }),
+    };
+    const extraction = {
+      extract: async () => ({
+        text: document,
+        warnings: [],
+        metadata: { extractionMethod: 'test', characterCount: document.length, wordCount: 1 },
+      }),
+    };
+    const service = new LearningPackImportService(
+      records as any,
+      {} as any,
+      storage as any,
+      'test-bucket',
+      extraction as any,
+    );
+
+    await service.upload(
+      { filename: 'pack.pdf', mimeType: 'application/pdf', buffer: Buffer.from('pdf') },
+      'admin-1',
+      'trace-1',
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toHaveProperty('extractedText', document);
+    expect(updates[0]).not.toHaveProperty('extractedTextStoragePath');
+    expect(Object.values(updates[0])).not.toContain(undefined);
+    expect(savedFiles).toHaveLength(1);
   });
 });
