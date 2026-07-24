@@ -711,6 +711,95 @@ export class LearningRepository {
       .map(({ recommendedRank, ...pack }: any) => pack);
   }
 
+  async getLearningPackDetail(scholarId: string | undefined, packId: string) {
+    const allPacks = await this.listCollectionOrSeed('learningPacks', sampleLearningPacks);
+    const packExists = allPacks.some(
+      (pack: any) => pack.id === packId || pack.externalId === packId || pack.slug === packId,
+    );
+    if (!packExists) return null;
+
+    const visiblePacks = await this.listLearningPacks(scholarId);
+    const listItem = (visiblePacks as any[]).find(
+      (pack: any) => pack.id === packId || pack.externalId === packId,
+    );
+    if (!listItem) return 'forbidden' as const;
+
+    const [capsules, questions, capsuleAttempts] = await Promise.all([
+      this.listCapsulesForPack(listItem.id),
+      this.listCollectionOrSeed('questions', sampleQuestions),
+      scholarId
+        ? this.listScholarDocuments('capsuleAttempts', scholarId)
+        : Promise.resolve(sampleCapsuleAttempts),
+    ]);
+    const packCapsules = (capsules as any[]).sort(
+      (left, right) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0),
+    );
+    const capsuleRows = packCapsules.map((capsule: any, index: number) => {
+      const attempt = (capsuleAttempts as any[]).find(
+        (item: any) => item.capsuleId === capsule.id,
+      );
+      const capsuleQuestions = (questions as any[]).filter(
+        (question: any) => question.capsuleId === capsule.id,
+      );
+      const status =
+        listItem.availabilityStatus !== 'available'
+          ? 'locked'
+          : attempt?.completedAtUtc || attempt?.status === 'complete'
+            ? 'completed'
+            : attempt
+              ? 'in_progress'
+              : 'not_started';
+      return removeUndefinedProperties({
+        id: capsule.id,
+        externalId: capsule.externalId ?? capsule.slug ?? capsule.id,
+        capsuleNumber: Number(capsule.capsuleNumber ?? capsule.sequence ?? index + 1),
+        sequence: Number(capsule.sequence ?? capsule.capsuleNumber ?? index + 1),
+        title: capsule.title,
+        questionCount: Number(capsule.questionCount ?? capsuleQuestions.length) || 0,
+        totalQuestions: Number(capsule.questionCount ?? capsuleQuestions.length) || 0,
+        status,
+        progressStatus: status,
+        completedAtUtc: isoOrUndefined(attempt?.completedAtUtc ?? attempt?.completedAt),
+        ...(listItem.availabilityStatus === 'available'
+          ? {
+              startUrl: `/capsules/${capsule.id}`,
+              continueUrl: attempt ? `/capsules/${attempt.id}` : undefined,
+            }
+          : {}),
+      });
+    });
+    const detailCapsules = capsuleRows as any[];
+    const activeCapsule = detailCapsules.find((capsule: any) => capsule.status === 'in_progress');
+    const nextCapsule = detailCapsules.find((capsule: any) => capsule.status === 'not_started');
+    const firstAvailableCapsule = activeCapsule ?? nextCapsule ?? capsuleRows[0];
+    const sourcePack = allPacks.find((pack: any) => pack.id === listItem.id) as any;
+    const objectives =
+      sourcePack.objectives ??
+      sourcePack.learningObjectives ??
+      String(listItem.objectivesSummary || '')
+        .split(/;\s*|\.\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    return removeUndefinedProperties({
+      ...listItem,
+      summary: sourcePack.summary ?? sourcePack.description ?? listItem.description,
+      objectives: objectives.length ? objectives : [listItem.objectivesSummary],
+      estimatedStudyMinutes: listItem.estimatedMinutes,
+      questionsAnswered: listItem.completedQuestions,
+      continueUrl:
+        listItem.availabilityStatus === 'available'
+          ? activeCapsule?.continueUrl ??
+            nextCapsule?.startUrl ??
+            firstAvailableCapsule?.continueUrl ??
+            listItem.continueUrl
+          : undefined,
+      activeCapsuleUrl: activeCapsule?.continueUrl,
+      nextCapsuleUrl: nextCapsule?.startUrl,
+      capsules: capsuleRows,
+    });
+  }
+
   async resumeCapsuleAttempt(capsuleAttemptId: string) {
     const attempt = await this.getById('capsuleAttempts', capsuleAttemptId, sampleCapsuleAttempts);
     if (!attempt) return null;
