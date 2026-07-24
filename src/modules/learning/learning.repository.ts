@@ -31,7 +31,11 @@ import {
   validateLearningPackImport,
   type LearningPackImportPayload,
 } from './content-import.js';
-import type { CheckInInput, MorningCheckInInput } from './check-ins.schemas.js';
+import type {
+  CheckInInput,
+  EveningCheckInInput,
+  MorningCheckInInput,
+} from './check-ins.schemas.js';
 
 const clampPercentage = (value: unknown, fallback = 0) =>
   Math.min(Math.max(Math.round(Number(value) || fallback), 0), 100);
@@ -145,6 +149,176 @@ export class LearningRepository {
     };
     await ref.set(checkIn);
     return checkIn;
+  }
+
+  private async getActiveChallengeContext(scholarId: string) {
+    const today = await this.getCurrentChallengeToday(scholarId);
+    if (!today || (today as any).locked) return null;
+    const dashboard = (await this.getDashboard()) as any;
+    const enrollment = await this.getActiveEnrollment(scholarId);
+    const challengeId =
+      (today as any).challengeId ?? enrollment?.challengeId ?? dashboard.activeChallengeId;
+    const dayNumber = Number((today as any).studyDay) || 1;
+    const timeZone =
+      enrollment?.cohortTimeZone ?? enrollment?.timeZone ?? dashboard.cohortTimeZone ?? 'UTC';
+    const start = dayStartInTimeZoneUtc(new Date(), timeZone);
+    const end = new Date(start.getTime() + 86400000);
+    return { today, dashboard, enrollment, challengeId, dayNumber, timeZone, start, end };
+  }
+
+  private isWithinDateRange(value: unknown, start: Date, end: Date) {
+    const date = toDate(value)?.getTime();
+    return date !== undefined && date >= start.getTime() && date < end.getTime();
+  }
+
+  async getEveningCheckInSummary(scholarId: string) {
+    const context = await this.getActiveChallengeContext(scholarId);
+    if (!context)
+      return {
+        capsulesCompletedToday: 0,
+        questionsCompletedToday: 0,
+        studyTimeRecordedMinutes: 0,
+        questionsMarkedForReview: 0,
+      };
+    const [capsuleAttempts, questionAttempts, studySessions, reviewMarkers] = await Promise.all([
+      this.listScholarDocuments('capsuleAttempts', scholarId),
+      this.listScholarDocuments('questionAttempts', scholarId),
+      this.listScholarDocuments('studySessions', scholarId),
+      this.listScholarDocuments('reviewMarkers', scholarId),
+    ]);
+    const { start, end } = context;
+    const completedCapsulesToday = (capsuleAttempts as any[]).filter(
+      (attempt) =>
+        (attempt.completedAtUtc || attempt.completedAt || attempt.status === 'complete') &&
+        this.isWithinDateRange(
+          attempt.completedAtUtc ?? attempt.completedAt ?? attempt.updatedAtUtc,
+          start,
+          end,
+        ),
+    );
+    const submittedQuestionsToday = (questionAttempts as any[]).filter(
+      (attempt) =>
+        (attempt.submittedAtUtc ||
+          attempt.completedAtUtc ||
+          attempt.answeredAtUtc ||
+          attempt.correct !== undefined) &&
+        this.isWithinDateRange(
+          attempt.submittedAtUtc ??
+            attempt.completedAtUtc ??
+            attempt.answeredAtUtc ??
+            attempt.updatedAtUtc,
+          start,
+          end,
+        ),
+    );
+    const studySessionMinutes = (studySessions as any[])
+      .filter((session) =>
+        this.isWithinDateRange(
+          session.recordedAtUtc ??
+            session.completedAtUtc ??
+            session.startedAtUtc ??
+            session.createdAtUtc,
+          start,
+          end,
+        ),
+      )
+      .reduce(
+        (sum, session) =>
+          sum +
+          (Number(session.minutes ?? session.durationMinutes) ||
+            Math.floor((Number(session.durationSeconds) || 0) / 60)),
+        0,
+      );
+    const capsuleActivityMinutes = completedCapsulesToday.reduce(
+      (sum, attempt: any) =>
+        sum +
+        (Number(attempt.studyMinutes ?? attempt.durationMinutes) ||
+          Math.floor((Number(attempt.durationSeconds) || 0) / 60)),
+      0,
+    );
+    const reviewMarkerCount = [
+      ...(reviewMarkers as any[]).filter((marker) =>
+        this.isWithinDateRange(
+          marker.markedAtUtc ?? marker.createdAtUtc ?? marker.updatedAtUtc,
+          start,
+          end,
+        ),
+      ),
+      ...(questionAttempts as any[]).filter(
+        (attempt) =>
+          attempt.markedForReview === true &&
+          this.isWithinDateRange(
+            attempt.markedForReviewAtUtc ??
+              attempt.submittedAtUtc ??
+              attempt.completedAtUtc ??
+              attempt.updatedAtUtc,
+            start,
+            end,
+          ),
+      ),
+    ].length;
+    return {
+      capsulesCompletedToday: completedCapsulesToday.length,
+      questionsCompletedToday: submittedQuestionsToday.length,
+      studyTimeRecordedMinutes: studySessionMinutes || capsuleActivityMinutes,
+      questionsMarkedForReview: reviewMarkerCount,
+    };
+  }
+
+  async saveEveningCheckIn(scholarId: string, input: EveningCheckInInput) {
+    const context = await this.getActiveChallengeContext(scholarId);
+    if (!context) return { status: 'not_found' as const };
+    const allowedMin = 1;
+    const allowedMax = Math.max(
+      Number(context.today.targetCapsules ?? context.dashboard.dailyTarget) || 0,
+      allowedMin,
+    );
+    if (input.goal < allowedMin || input.goal > allowedMax) {
+      return {
+        status: 'validation_error' as const,
+        errors: {
+          goal: [`Goal must be between ${allowedMin} and ${allowedMax}.`],
+          goalMin: allowedMin,
+          goalMax: allowedMax,
+        },
+      };
+    }
+    const now = new Date().toISOString();
+    const checkInId = `evening-${scholarId}-${context.challengeId ?? 'challenge'}-day-${context.dayNumber}`;
+    const ref = this.db.collection('checkIns').doc(checkInId);
+    const existing = await ref.get();
+    const existingData = existing.exists ? (existing.data() as any) : null;
+    const checkIn = removeUndefinedProperties({
+      ...existingData,
+      id: checkInId,
+      kind: 'evening',
+      type: 'evening',
+      status: 'complete',
+      scholarId,
+      userId: scholarId,
+      challengeId: context.challengeId,
+      dayNumber: context.dayNumber,
+      confidence: input.confidence,
+      goalMet: input.goalMet,
+      supportGivenToday: input.supportGivenToday ?? 0,
+      supportReceivedToday: input.supportReceivedToday ?? 0,
+      tomorrowGoal: input.goal,
+      goal: input.goal,
+      reflection: input.reflection,
+      createdAtUtc: existingData?.createdAtUtc ?? now,
+      updatedAtUtc: now,
+    }) as Record<string, unknown>;
+    await ref.set(checkIn, { merge: true });
+    return {
+      status: 'saved' as const,
+      created: !existing.exists,
+      data: {
+        id: checkInId,
+        kind: 'evening',
+        status: 'complete',
+        message: 'Evening check-in complete. See you tomorrow.',
+      },
+    };
   }
 
   async saveMorningCheckIn(scholarId: string, input: MorningCheckInInput) {

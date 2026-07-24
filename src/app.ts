@@ -234,6 +234,30 @@ export async function buildApp(overrides?: any) {
               },
             };
           },
+          getEveningCheckInSummary: async () => ({
+            capsulesCompletedToday: 3,
+            questionsCompletedToday: 42,
+            studyTimeRecordedMinutes: 95,
+            questionsMarkedForReview: 6,
+          }),
+          saveEveningCheckIn: async (_userId: string, input: any) => {
+            if (input.goal < 1 || input.goal > 15) {
+              return {
+                status: 'validation_error',
+                errors: { goal: ['Goal must be between 1 and 15.'], goalMin: 1, goalMax: 15 },
+              };
+            }
+            return {
+              status: 'saved',
+              created: true,
+              data: {
+                id: 'evening-check-in-test',
+                kind: 'evening',
+                status: 'complete',
+                message: 'Evening check-in complete. See you tomorrow.',
+              },
+            };
+          },
           resumeCapsuleAttempt: async (capsuleAttemptId: string) => {
             const seed = await import('./modules/learning/learning.seed.js');
             const attempt = seed.sampleCapsuleAttempts.find((item) => item.id === capsuleAttemptId);
