@@ -488,7 +488,6 @@ describe('MindUnlocking API', () => {
       '/admin/content-review',
       '/admin/reports',
       '/admin/audit',
-      '/rewards',
       '/certificates',
       '/raffle-entries',
       '/mentor/dashboard',
@@ -581,17 +580,30 @@ describe('MindUnlocking API', () => {
       featureFlags: { rewards: true },
     });
 
-    const rewards = await app.inject('/api/v1/rewards');
+    const rewards = await app.inject({
+      method: 'GET',
+      url: '/api/v1/rewards',
+      headers: { authorization: `Bearer ${scholarAccess.token}` },
+    });
     expect(rewards.statusCode).toBe(200);
-    expect(rewards.json().data[0]).toMatchObject({
+    expect(rewards.json().rewards[0]).toMatchObject({
       id: 'daily-check-in-starter',
-      type: 'badge',
-      status: 'active',
+      name: 'Daily Check-in Starter',
+      type: 'digital_badge',
+      earnedDate: null,
+      progressCurrent: 0,
+      progressTarget: 1,
+      eligibilityRequirement: 'Complete your first readiness check-in.',
+      status: 'in_progress',
     });
 
-    const legacyRewards = await app.inject('/rewards');
+    const legacyRewards = await app.inject({
+      method: 'GET',
+      url: '/rewards',
+      headers: { authorization: `Bearer ${scholarAccess.token}` },
+    });
     expect(legacyRewards.statusCode).toBe(200);
-    expect(legacyRewards.json().data).toEqual(rewards.json().data);
+    expect(legacyRewards.json().rewards).toEqual(rewards.json().rewards);
 
     const certificates = await app.inject('/api/v1/certificates');
     expect(certificates.statusCode).toBe(200);

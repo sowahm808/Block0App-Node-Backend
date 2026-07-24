@@ -39,6 +39,38 @@ import type {
   MorningCheckInInput,
 } from './check-ins.schemas.js';
 
+const rewardTypeMap: Record<string, string> = {
+  badge: 'digital_badge',
+  points: 'recognition',
+};
+
+const toIsoDate = (value: unknown) => {
+  if (!value) return null;
+  if (typeof value === 'string') return value.slice(0, 10);
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof (value as any)?.toDate === 'function') {
+    return (value as any).toDate().toISOString().slice(0, 10);
+  }
+  return null;
+};
+
+const normalizeReward = (reward: any) => ({
+  id: String(reward.id),
+  name: String(reward.name ?? reward.title ?? 'Reward'),
+  description: String(reward.description ?? ''),
+  type: rewardTypeMap[reward.type] ?? reward.type ?? 'recognition',
+  earnedDate: reward.earnedDate === undefined ? toIsoDate(reward.earnedAtUtc) : reward.earnedDate,
+  progressCurrent: Number(reward.progressCurrent ?? (reward.earned ? 1 : 0)),
+  progressTarget: Math.max(1, Number(reward.progressTarget ?? 1)),
+  eligibilityRequirement: String(
+    reward.eligibilityRequirement ??
+      reward.requirement ??
+      reward.description ??
+      'Meet the reward eligibility rule.',
+  ),
+  status: reward.status === 'active' ? (reward.earned ? 'earned' : 'in_progress') : reward.status,
+});
+
 const clampPercentage = (value: unknown, fallback = 0) =>
   Math.min(Math.max(Math.round(Number(value) || fallback), 0), 100);
 
@@ -1173,9 +1205,9 @@ export class LearningRepository {
   }
 
   async listRewards() {
-    const snapshot = await this.db.collection('rewards').where('status', '==', 'active').get();
-    const rewards = snapshot.docs.map((doc) => doc.data());
-    return rewards.length ? rewards : sampleRewards;
+    const snapshot = await this.db.collection('rewards').get();
+    const rewards = snapshot.docs.map((doc) => normalizeReward({ id: doc.id, ...doc.data() }));
+    return rewards.length ? rewards : sampleRewards.map(normalizeReward);
   }
 
   async listCertificates() {

@@ -575,16 +575,14 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
         request.user?.uid ?? 'anonymous-scholar',
         input,
       );
-      return reply
-        .status(201)
-        .send(
-          created ?? {
-            id: crypto.randomUUID(),
-            ...input,
-            status: 'Submitted',
-            submittedDate: new Date().toISOString(),
-          },
-        );
+      return reply.status(201).send(
+        created ?? {
+          id: crypto.randomUUID(),
+          ...input,
+          status: 'Submitted',
+          submittedDate: new Date().toISOString(),
+        },
+      );
     },
   );
 
@@ -623,7 +621,9 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     },
   );
 
-  app.get('/rewards', async () => ({ data: await learning.listRewards() }));
+  app.get('/rewards', { preHandler: requireScholarAccess }, async () => ({
+    rewards: await learning.listRewards(),
+  }));
 
   app.get('/certificates', async () => ({ data: await learning.listCertificates() }));
 
