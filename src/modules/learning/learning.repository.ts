@@ -42,6 +42,56 @@ const toDate = (value: unknown): Date | null => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const PROGRAM_PHASES = [
+  {
+    id: 'knowledge-mastery',
+    title: 'Knowledge mastery',
+    dayStart: 1,
+    dayEnd: 14,
+    metrics: ['Learning-pack count', 'Question count', 'Daily target'],
+  },
+  {
+    id: 'clinical-scenarios',
+    title: 'Clinical scenarios',
+    dayStart: 15,
+    dayEnd: 18,
+    metrics: ['Scenario volume', 'Daily target'],
+  },
+  {
+    id: 'rehearsal',
+    title: 'Rehearsal',
+    dayStart: 19,
+    dayEnd: 20,
+    metrics: ['Weak-topic review', 'Marked questions'],
+  },
+  {
+    id: 'rest',
+    title: 'Rest',
+    dayStart: 21,
+    dayEnd: 21,
+    metrics: ['Rest', 'Exam preparation', 'Final readiness'],
+  },
+];
+
+const SCENARIO_VOLUMES: Record<number, number> = { 15: 10, 16: 20, 17: 40, 18: 60 };
+
+const isoOrUndefined = (value: unknown) => toDate(value)?.toISOString();
+
+const dayStartInTimeZoneUtc = (date: Date, timeZone: string) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((acc, part) => {
+      if (part.type !== 'literal') acc[part.type] = part.value;
+      return acc;
+    }, {});
+  return new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00.000Z`);
+};
+
 const removeUndefinedProperties = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map((item) => (item === undefined ? null : removeUndefinedProperties(item)));
@@ -234,6 +284,128 @@ export class LearningRepository {
       currentCapsuleUrl: dashboard.currentCapsuleUrl ?? dashboard.continueUrl ?? undefined,
       locked: false,
       assignedLearningPacks,
+    };
+  }
+
+  async getCurrentChallengeProgram(scholarId?: string) {
+    const dashboard = (await this.getDashboard()) as any;
+    const enrollment = scholarId ? await this.getActiveEnrollment(scholarId) : null;
+    const challengeId = enrollment?.challengeId ?? dashboard.activeChallengeId;
+    const challenge = challengeId
+      ? await this.getChallenge(challengeId)
+      : (await this.listChallenges())[0];
+    if (!challenge) return null;
+
+    const timezone =
+      enrollment?.cohortTimeZone ?? enrollment?.timeZone ?? dashboard.cohortTimeZone ?? 'UTC';
+    const currentDay = this.programCurrentDay(enrollment, dashboard, timezone);
+    const [
+      challengeDays,
+      learningPacks,
+      questionAttempts,
+      scenarioAssignments,
+      scenarioAttempts,
+      reviewQueues,
+      dayProgress,
+    ] = await Promise.all([
+      this.getChallengeDays(challenge.id),
+      this.listLearningPacksForChallenge(challenge.id),
+      scholarId
+        ? this.listScholarDocuments('questionAttempts', scholarId)
+        : Promise.resolve(sampleQuestionAttempts),
+      this.listChallengeCollection('scenarioAssignments', challenge.id),
+      scholarId ? this.listScholarDocuments('scenarioAttempts', scholarId) : Promise.resolve([]),
+      scholarId ? this.listScholarDocuments('reviewQueues', scholarId) : Promise.resolve([]),
+      scholarId ? this.listScholarDocuments('dayProgress', scholarId) : Promise.resolve([]),
+    ]);
+
+    const days = Array.from({ length: 21 }, (_, index) => {
+      const dayNumber = index + 1;
+      const dayDefinition =
+        (challengeDays as any[]).find(
+          (day: any) => Number(day.day ?? day.dayNumber) === dayNumber,
+        ) ?? {};
+      const progress =
+        (dayProgress as any[]).find(
+          (item: any) => Number(item.dayNumber ?? item.day) === dayNumber,
+        ) ?? {};
+      const availableAtUtc = isoOrUndefined(
+        dayDefinition.releaseAtUtc ??
+          dayDefinition.availableAtUtc ??
+          progress.availableAtUtc ??
+          this.releaseForProgramDay(enrollment, dashboard, dayNumber, timezone),
+      );
+      const locked = !!availableAtUtc && new Date(availableAtUtc).getTime() > Date.now();
+      const completedAtUtc = isoOrUndefined(
+        progress.completedAtUtc ?? progress.completedAt ?? dayDefinition.completedAtUtc,
+      );
+      const dayPacks = (learningPacks as any[]).filter(
+        (pack) => Number(pack.dayNumber ?? pack.studyDay) === dayNumber,
+      );
+      const activityType = this.programActivityType(dayNumber);
+      const workload = this.programWorkload(
+        dayNumber,
+        dayPacks,
+        questionAttempts as any[],
+        scenarioAssignments as any[],
+        scenarioAttempts as any[],
+        reviewQueues as any[],
+        progress,
+      );
+      const completionPercent = completedAtUtc
+        ? 100
+        : clampPercentage(
+            progress.completionPercent ??
+              progress.completionPercentage ??
+              workload.completionPercent,
+          );
+      const status = this.programDayStatus(
+        dayNumber,
+        currentDay,
+        completionPercent,
+        locked,
+        completedAtUtc,
+      );
+      return removeUndefinedProperties({
+        dayNumber,
+        activityType,
+        status,
+        completionPercent,
+        locked,
+        ...workload.fields,
+        dailyTarget: workload.dailyTarget,
+        focus: workload.focus,
+        availableAtUtc,
+        completedAtUtc,
+      });
+    }) as any[];
+
+    const phases = PROGRAM_PHASES.map((phase) => {
+      const phaseDays = days.filter(
+        (day) => day.dayNumber >= phase.dayStart && day.dayNumber <= phase.dayEnd,
+      );
+      return {
+        ...phase,
+        completionPercent: clampPercentage(
+          phaseDays.reduce((sum, day) => sum + Number(day.completionPercent || 0), 0) /
+            phaseDays.length,
+        ),
+      };
+    });
+
+    return {
+      challengeId: challenge.id,
+      challengeName:
+        enrollment?.challengeName ?? (challenge as any).programName ?? (challenge as any).title,
+      currentDay,
+      overallCompletion: clampPercentage(
+        enrollment?.overallCompletion ??
+          dashboard.overallCompletion ??
+          days.reduce((sum, day) => sum + Number(day.completionPercent || 0), 0) / days.length,
+      ),
+      timezone,
+      phases,
+      days,
     };
   }
 
@@ -753,6 +925,154 @@ export class LearningRepository {
     const settings = (await this.getSystemSettings()) as Record<string, unknown>;
     const secretPattern = /(secret|token|key|password|credential)/i;
     return Object.fromEntries(Object.entries(settings).filter(([key]) => !secretPattern.test(key)));
+  }
+
+  private async listLearningPacksForChallenge(challengeId: string) {
+    const snapshot = await this.db
+      .collection('learningPacks')
+      .where('challengeId', '==', challengeId)
+      .get();
+    const packs = snapshot.docs.map((doc) => doc.data() as any);
+    return packs.length
+      ? packs
+      : sampleLearningPacks.filter((pack: any) => pack.challengeId === challengeId);
+  }
+
+  private async listChallengeCollection(collectionName: string, challengeId: string) {
+    const snapshot = await this.db
+      .collection(collectionName)
+      .where('challengeId', '==', challengeId)
+      .get();
+    return snapshot.docs.map((doc) => doc.data());
+  }
+
+  private programCurrentDay(enrollment: any, dashboard: any, timezone: string) {
+    const explicitDay = Number(enrollment?.currentDay ?? dashboard.currentDay);
+    const startDate = toDate(
+      enrollment?.startDate ?? enrollment?.startDateUtc ?? enrollment?.cohortStartDateUtc,
+    );
+    if (!startDate) return Math.min(Math.max(explicitDay || 1, 1), 21);
+    const startLocal = dayStartInTimeZoneUtc(startDate, timezone).getTime();
+    const nowLocal = dayStartInTimeZoneUtc(new Date(), timezone).getTime();
+    const extensionDays = Number(enrollment?.extensionDays ?? enrollment?.extensionsDays) || 0;
+    return Math.min(
+      Math.max(Math.floor((nowLocal - startLocal) / 86400000) + 1 - extensionDays, 1),
+      21,
+    );
+  }
+
+  private releaseForProgramDay(
+    enrollment: any,
+    dashboard: any,
+    dayNumber: number,
+    timezone: string,
+  ) {
+    const schedule = enrollment?.releaseSchedule ?? dashboard.releaseSchedule;
+    const scheduled = Array.isArray(schedule)
+      ? schedule.find((item: any) => Number(item.dayNumber ?? item.day) === dayNumber)
+      : null;
+    if (scheduled?.availableAtUtc || scheduled?.releaseAtUtc) {
+      return scheduled.availableAtUtc ?? scheduled.releaseAtUtc;
+    }
+    const startDate = toDate(
+      enrollment?.startDate ?? enrollment?.startDateUtc ?? enrollment?.cohortStartDateUtc,
+    );
+    if (!startDate) return undefined;
+    const startLocal = dayStartInTimeZoneUtc(startDate, timezone);
+    return new Date(startLocal.getTime() + (dayNumber - 1) * 86400000).toISOString();
+  }
+
+  private programActivityType(dayNumber: number) {
+    if (dayNumber <= 14) return 'Knowledge mastery';
+    if (dayNumber <= 18) return 'Clinical scenarios';
+    if (dayNumber <= 20) return 'Rehearsal';
+    return 'Rest';
+  }
+
+  private programWorkload(
+    dayNumber: number,
+    dayPacks: any[],
+    questionAttempts: any[],
+    scenarioAssignments: any[],
+    scenarioAttempts: any[],
+    reviewQueues: any[],
+    progress: any,
+  ) {
+    if (dayNumber <= 14) {
+      const learningPackCount = Number((progress.learningPackCount ?? dayPacks.length) || 3);
+      const questionCount = Number(
+        (progress.questionCount ??
+          dayPacks.reduce(
+            (sum, pack) => sum + Number(pack.questionCount ?? pack.targetQuestions ?? 0),
+            0,
+          )) ||
+          60,
+      );
+      const completedQuestions = questionAttempts.filter(
+        (attempt) =>
+          Number(attempt.dayNumber ?? attempt.day) === dayNumber &&
+          (attempt.submittedAtUtc || attempt.completedAtUtc || attempt.correct !== undefined),
+      ).length;
+      return {
+        fields: { learningPackCount, questionCount },
+        dailyTarget: `${learningPackCount} learning packs • ${questionCount} questions`,
+        focus: ['Knowledge mastery', 'Learning-pack count', 'Question count', 'Daily target'],
+        completionPercent: questionCount ? (completedQuestions / questionCount) * 100 : 0,
+      };
+    }
+    if (dayNumber <= 18) {
+      const assigned = scenarioAssignments.find(
+        (item) => Number(item.dayNumber ?? item.day) === dayNumber,
+      );
+      const scenarioVolume = Number(
+        progress.scenarioVolume ??
+          assigned?.scenarioVolume ??
+          assigned?.volume ??
+          SCENARIO_VOLUMES[dayNumber],
+      );
+      const completedScenarios = scenarioAttempts.filter(
+        (attempt) =>
+          Number(attempt.dayNumber ?? attempt.day) === dayNumber &&
+          (attempt.completedAtUtc || attempt.submittedAtUtc || attempt.status === 'complete'),
+      ).length;
+      return {
+        fields: { scenarioVolume },
+        dailyTarget: `${scenarioVolume} clinical scenarios`,
+        focus: ['Clinical scenarios', 'Scenario volume', 'Daily target'],
+        completionPercent: scenarioVolume ? (completedScenarios / scenarioVolume) * 100 : 0,
+      };
+    }
+    if (dayNumber <= 20) {
+      const queue =
+        reviewQueues.find((item) => Number(item.dayNumber ?? item.day) === dayNumber) ?? {};
+      return {
+        fields: {},
+        dailyTarget: 'Weak-topic review • Marked questions',
+        focus: ['Rehearsal', 'Weak-topic review', 'Marked questions'],
+        completionPercent: progress.completionPercent ?? queue.completionPercent ?? 0,
+      };
+    }
+    return {
+      fields: {},
+      dailyTarget: 'Rest • Exam preparation • Final readiness',
+      focus: ['Rest', 'Exam preparation', 'Final readiness'],
+      completionPercent: 0,
+    };
+  }
+
+  private programDayStatus(
+    dayNumber: number,
+    currentDay: number,
+    completionPercent: number,
+    locked: boolean,
+    completedAtUtc?: string,
+  ) {
+    if (dayNumber === 21) return 'Rest Day';
+    if (completedAtUtc || completionPercent >= 100) return 'Completed';
+    if (locked || dayNumber > currentDay) return 'Upcoming';
+    if (dayNumber < currentDay) return 'Missed';
+    if (completionPercent > 0) return 'In Progress';
+    return 'Available';
   }
 
   async listReadinessPrompts() {

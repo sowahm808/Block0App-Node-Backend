@@ -71,6 +71,16 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   };
 
   app.get(
+    '/challenges/current/program',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const program = await learning.getCurrentChallengeProgram(request.user?.uid);
+      if (!program) throw new NotFoundError('Current challenge program not found');
+      return { data: program };
+    },
+  );
+
+  app.get(
     '/challenges/current/today',
     { preHandler: authService ? requireScholarAccess : undefined },
     async (request) => {

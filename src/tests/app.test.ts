@@ -1148,6 +1148,145 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('builds the 21-day current challenge program contract', async () => {
+    const makeRepo = (collections: Record<string, any[]>) => {
+      const db = {
+        collection(name: string) {
+          let rows = collections[name] ?? [];
+          const query = {
+            where(field: string, _operator: string, value: string) {
+              rows = rows.filter((row) => row[field] === value);
+              return query;
+            },
+            limit() {
+              return query;
+            },
+            async get() {
+              return { empty: rows.length === 0, docs: rows.map((row) => ({ data: () => row })) };
+            },
+            doc(id?: string) {
+              return {
+                id: id ?? 'generated-id',
+                async get() {
+                  const row = rows.find((item) => item.id === id);
+                  return { exists: !!row, data: () => row };
+                },
+              };
+            },
+          };
+          return query;
+        },
+      };
+      return new LearningRepository(db as any);
+    };
+
+    const program = await makeRepo({
+      enrollments: [
+        {
+          scholarId: 'scholar-a',
+          status: 'active',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          challengeName: 'Block Zero Ready',
+          currentDay: 16,
+          cohortTimeZone: 'America/New_York',
+          overallCompletion: 34,
+        },
+      ],
+      dashboard: [{ activeChallengeId: 'block-zero-21-day-medical-exam-prep' }],
+      dayProgress: [
+        {
+          scholarId: 'scholar-a',
+          dayNumber: 1,
+          completionPercent: 100,
+          completedAtUtc: '2026-07-01T21:14:00.000Z',
+        },
+        { scholarId: 'scholar-a', dayNumber: 16, completionPercent: 25 },
+      ],
+      learningPacks: [
+        {
+          id: 'lp-1a',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          dayNumber: 1,
+          questionCount: 20,
+        },
+        {
+          id: 'lp-1b',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          dayNumber: 1,
+          questionCount: 20,
+        },
+        {
+          id: 'lp-1c',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          dayNumber: 1,
+          questionCount: 20,
+        },
+      ],
+      challengeDays: [
+        {
+          id: 'day-01',
+          challengeId: 'block-zero-21-day-medical-exam-prep',
+          day: 1,
+          availableAtUtc: '2026-07-01T04:00:00.000Z',
+        },
+      ],
+    }).getCurrentChallengeProgram('scholar-a');
+
+    expect(program).toMatchObject({
+      challengeId: 'block-zero-21-day-medical-exam-prep',
+      challengeName: 'Block Zero Ready',
+      currentDay: 16,
+      overallCompletion: 34,
+      timezone: 'America/New_York',
+      phases: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'knowledge-mastery',
+          dayStart: 1,
+          dayEnd: 14,
+          metrics: ['Learning-pack count', 'Question count', 'Daily target'],
+        }),
+      ]),
+    });
+    expect(program?.days).toHaveLength(21);
+    expect(program?.days[0]).toMatchObject({
+      dayNumber: 1,
+      activityType: 'Knowledge mastery',
+      status: 'Completed',
+      completionPercent: 100,
+      locked: false,
+      learningPackCount: 3,
+      questionCount: 60,
+      dailyTarget: '3 learning packs • 60 questions',
+      focus: ['Knowledge mastery', 'Learning-pack count', 'Question count', 'Daily target'],
+      availableAtUtc: '2026-07-01T04:00:00.000Z',
+      completedAtUtc: '2026-07-01T21:14:00.000Z',
+    });
+    expect(program?.days[14]).toMatchObject({
+      dayNumber: 15,
+      activityType: 'Clinical scenarios',
+      scenarioVolume: 10,
+      dailyTarget: '10 clinical scenarios',
+    });
+    expect(program?.days[15]).toMatchObject({
+      dayNumber: 16,
+      activityType: 'Clinical scenarios',
+      status: 'In Progress',
+      completionPercent: 25,
+      scenarioVolume: 20,
+    });
+    expect(program?.days[18]).toMatchObject({
+      dayNumber: 19,
+      activityType: 'Rehearsal',
+      dailyTarget: 'Weak-topic review • Marked questions',
+    });
+    expect(program?.days[20]).toMatchObject({
+      dayNumber: 21,
+      activityType: 'Rest',
+      status: 'Rest Day',
+      dailyTarget: 'Rest • Exam preparation • Final readiness',
+    });
+  });
+
   it('builds active and locked daily challenge contracts', async () => {
     const makeRepo = (collections: Record<string, any[]>) => {
       const db = {

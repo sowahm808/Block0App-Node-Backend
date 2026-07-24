@@ -14,6 +14,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 - `GET /api/v1/rewards` returns seeded active rewards for frontend reward dashboards. Legacy alias: `GET /rewards`.
 - `GET /api/v1/certificates` returns seeded learner certificates for frontend credential screens. Legacy alias: `GET /certificates`.
 - `GET /api/v1/raffle-entries` returns seeded raffle entries for frontend rewards screens. Legacy alias: `GET /raffle-entries`.
+- `GET /api/v1/challenges/current/program` requires authenticated `scholar:access` and returns the active scholar's cohort-timezone-adjusted 21-day program structure with phase totals, day statuses, locks, daily targets, completion, knowledge-pack/question counts, scenario volumes, rehearsal focus, and rest-day guidance.
 - `GET /api/v1/dashboard` requires authenticated `scholar:access` and returns the current scholar challenge dashboard with `enrollmentState` values for `active`, `not_enrolled`, `not_started`, and `completed`. Compatibility aliases `/api/v1/mentor/dashboard`, `/api/v1/review/dashboard`, and `/api/v1/admin/dashboard` continue to return the seeded dashboard summary for legacy screens.
 - `GET /api/v1/admin/system-settings` returns frontend-safe system settings and feature flags for admin screens.
 - `GET /api/v1/review/content` returns content-review queue items enriched with their associated content metadata.
