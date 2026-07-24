@@ -431,6 +431,78 @@ export class LearningRepository {
       : snapshot.docs[0].data();
   }
 
+  async listAdminCollection(collectionName: string, query: Record<string, unknown> = {}) {
+    const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
+    const snapshot = await this.db.collection(collectionName).limit(limit).get();
+    return {
+      items: snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      nextCursor: null,
+    };
+  }
+
+  async saveAdminDocument(
+    collectionName: string,
+    payload: Record<string, unknown>,
+    audit: { actorId: string },
+  ) {
+    const now = new Date().toISOString();
+    const id =
+      typeof payload.id === 'string' && payload.id.trim()
+        ? payload.id.trim()
+        : this.db.collection(collectionName).doc().id;
+    const existing = await this.db.collection(collectionName).doc(id).get();
+    const document = removeUndefinedProperties({
+      ...payload,
+      id,
+      status: payload.status ?? 'draft',
+      createdAtUtc: existing.exists ? (existing.data() as any)?.createdAtUtc : now,
+      updatedAtUtc: now,
+      audit: {
+        updatedBy: audit.actorId,
+        updatedAtUtc: now,
+      },
+    });
+    await this.db
+      .collection(collectionName)
+      .doc(id)
+      .set(document as any, { merge: true });
+    return { ...(document as Record<string, unknown>), persisted: true };
+  }
+
+  async searchCertificates(query: Record<string, unknown> = {}) {
+    const certificates = await this.listAdminCollection('certificates', query);
+    return { ...certificates, audit: [] };
+  }
+
+  async recordCertificateOperation(payload: Record<string, unknown>, actorId: string) {
+    const now = new Date().toISOString();
+    const action = typeof payload.action === 'string' ? payload.action : 'search';
+    const id =
+      typeof payload.id === 'string' && payload.id.trim()
+        ? payload.id.trim()
+        : `certificate-operation-${Date.now()}`;
+    const document = removeUndefinedProperties({
+      ...payload,
+      id,
+      action,
+      status: 'accepted',
+      requestedBy: actorId,
+      requestedAtUtc: now,
+      updatedAtUtc: now,
+    });
+    await this.db
+      .collection('certificateOperations')
+      .doc(id)
+      .set(document as any, { merge: true });
+    return document;
+  }
+
+  async getSanitizedSystemSettings() {
+    const settings = (await this.getSystemSettings()) as Record<string, unknown>;
+    const secretPattern = /(secret|token|key|password|credential)/i;
+    return Object.fromEntries(Object.entries(settings).filter(([key]) => !secretPattern.test(key)));
+  }
+
   async listReadinessPrompts() {
     const snapshot = await this.db.collection('readinessPrompts').get();
     const prompts = snapshot.docs.map((doc) => doc.data());
