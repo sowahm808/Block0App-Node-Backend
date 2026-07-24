@@ -192,8 +192,18 @@ const normalizeCertificate = (certificate: any) => {
   const verificationCode = String(certificate.verificationCode ?? certificate.verificationId ?? '');
   return {
     scholarName: String(certificate.scholarName ?? certificate.displayName ?? 'Scholar'),
+    scholarDisplayName: String(
+      certificate.scholarDisplayName ??
+        certificate.publicDisplayName ??
+        certificate.displayName ??
+        certificate.scholarName ??
+        'Scholar',
+    ),
     challengeName: String(
       certificate.challengeName ?? certificate.title ?? 'Block Zero 3-Week CNA Challenge',
+    ),
+    issuingOrganization: String(
+      certificate.issuingOrganization ?? certificate.issuerName ?? 'Mind Unlocking Academy',
     ),
     certificateNumber,
     issueDate: String(
@@ -204,6 +214,14 @@ const normalizeCertificate = (certificate: any) => {
     ),
     verificationCode,
     status: certificate.status === 'issued' ? 'active' : String(certificate.status ?? 'active'),
+    revocationDate: certificate.publicRevocationDatePermitted
+      ? String(
+          certificate.revocationDate ??
+            toIsoDate(certificate.revokedAtUtc) ??
+            toIsoDate(certificate.revokedAt) ??
+            '',
+        ) || undefined
+      : undefined,
     downloadUrl: certificate.downloadUrl ?? `/certificates/${certificateNumber}/pdf`,
     verificationUrl: certificate.verificationUrl ?? `/certificate/verify/${verificationCode}`,
   };
@@ -3216,9 +3234,10 @@ export class LearningRepository {
   }
 
   async verifyCertificate(verificationCode: string) {
+    const normalizedCode = verificationCode.trim().toUpperCase();
     const snapshot = await this.db
       .collection('certificates')
-      .where('verificationCode', '==', verificationCode)
+      .where('verificationCode', '==', normalizedCode)
       .limit(1)
       .get();
     const certificate = normalizeCertificate(snapshot.docs[0]?.data());

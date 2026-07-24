@@ -2420,4 +2420,131 @@ describe('check-in history', () => {
     expect(support.json()).toMatchObject({ status: 'Open' });
     expect(support.json().requestId).toMatch(/^asr_/);
   });
+  it('verifies public certificates without scholar authentication and exposes only public fields', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+      learning: {
+        seedAll: async () => ({}),
+        verifyCertificate: async () => ({
+          certificate: {
+            status: 'active',
+            scholarDisplayName: 'Jordan P.',
+            scholarName: 'Jordan Private Legal',
+            email: 'jordan@example.com',
+            userId: 'user-secret',
+            challengeName: 'Block Zero Ready Challenge',
+            issueDate: '2026-07-24',
+            certificateNumber: 'B0-2026-000123',
+            issuingOrganization: 'Mind Unlocking Academy',
+          },
+        }),
+      },
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/certificates/verify/B0V-VALID',
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({
+      status: 'valid',
+      scholarDisplayName: 'Jordan P.',
+      challengeName: 'Block Zero Ready Challenge',
+      issueDate: '2026-07-24',
+      certificateNumber: 'B0-2026-000123',
+      issuingOrganization: 'Mind Unlocking Academy',
+      correlationId: expect.any(String),
+    });
+  });
+
+  it('returns normalized invalid public certificate verification results', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+      learning: { seedAll: async () => ({}), verifyCertificate: async () => null },
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/certificates/verify/B0V-MISSING',
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ status: 'invalid', correlationId: expect.any(String) });
+  });
+
+  it('returns revoked public certificate verification results with optional public date', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+      learning: {
+        seedAll: async () => ({}),
+        verifyCertificate: async (code: string) => ({
+          certificate: {
+            status: 'revoked',
+            scholarDisplayName: 'Jordan P.',
+            challengeName: 'Block Zero Ready Challenge',
+            issueDate: '2026-07-24',
+            certificateNumber: 'B0-2026-000123',
+            issuingOrganization: 'Mind Unlocking Academy',
+            revocationDate: code === 'B0V-REVOKED-DATED' ? '2026-08-10' : undefined,
+          },
+        }),
+      },
+    });
+    const withDate = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/certificates/verify/B0V-REVOKED-DATED',
+    });
+    const withoutDate = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/certificates/verify/B0V-REVOKED-PRIVATE',
+    });
+    expect(withDate.statusCode).toBe(200);
+    expect(withDate.json()).toMatchObject({ status: 'revoked', revocationDate: '2026-08-10' });
+    expect(withoutDate.statusCode).toBe(200);
+    expect(withoutDate.json()).toMatchObject({ status: 'revoked' });
+    expect(withoutDate.json()).not.toHaveProperty('revocationDate');
+  });
+
+  it('rate-limits public certificate verification by IP and verification code', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+      learning: { seedAll: async () => ({}), verifyCertificate: async () => null },
+    });
+    let last;
+    for (let i = 0; i < 31; i += 1)
+      last = await app.inject({
+        method: 'GET',
+        url: '/api/v1/public/certificates/verify/B0V-LIMIT',
+      });
+    expect(last!.statusCode).toBe(429);
+    expect(last!.json()).toMatchObject({ status: 429, correlationId: expect.any(String) });
+  });
+
+  it('returns public certificate backend errors with a correlation ID', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: { ready: async () => ({ status: 'ready' }) },
+      learning: {
+        seedAll: async () => ({}),
+        verifyCertificate: async () => {
+          throw new Error('database unavailable');
+        },
+      },
+    });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/v1/public/certificates/verify/B0V-ERROR',
+    });
+    expect(r.statusCode).toBe(500);
+    expect(r.json()).toEqual({
+      message: 'Unable to verify this certificate right now.',
+      correlationId: expect.any(String),
+    });
+  });
 });

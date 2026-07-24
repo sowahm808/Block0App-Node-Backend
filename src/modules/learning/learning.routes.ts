@@ -671,15 +671,66 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
       .send(Buffer.from(body));
   });
 
-  app.get('/public/certificates/verify/:verificationCode', async (request) => {
-    const { verificationCode } = request.params as { verificationCode: string };
-    const verification =
-      'verifyCertificate' in learning
-        ? await (learning as any).verifyCertificate(verificationCode)
-        : null;
-    if (!verification) throw new NotFoundError('Certificate not found');
-    return verification;
-  });
+  app.get(
+    '/public/certificates/verify/:verificationCode',
+    {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: '1 minute',
+          keyGenerator: (request: any) => {
+            const { verificationCode } = request.params as { verificationCode?: string };
+            return `${request.ip}:${String(verificationCode ?? '')
+              .trim()
+              .toUpperCase()}`;
+          },
+        },
+      },
+      schema: {
+        params: zodToJsonSchema(
+          z.object({
+            verificationCode: z.string().trim().min(1).max(500),
+          }),
+        ),
+      },
+    },
+    async (request, reply) => {
+      const { verificationCode } = request.params as { verificationCode: string };
+      const normalizedCode = verificationCode.trim().toUpperCase();
+      try {
+        const verification =
+          'verifyCertificate' in learning
+            ? await (learning as any).verifyCertificate(normalizedCode)
+            : null;
+        if (!verification?.certificate) {
+          return { status: 'invalid', correlationId: request.id };
+        }
+        const certificate = verification.certificate;
+        const status = certificate.status === 'revoked' ? 'revoked' : 'valid';
+        return {
+          status,
+          scholarDisplayName: certificate.scholarDisplayName ?? certificate.scholarName,
+          challengeName: certificate.challengeName,
+          issueDate: certificate.issueDate,
+          certificateNumber: certificate.certificateNumber,
+          issuingOrganization: certificate.issuingOrganization ?? 'Mind Unlocking Academy',
+          ...(status === 'revoked' && certificate.revocationDate
+            ? { revocationDate: certificate.revocationDate }
+            : {}),
+          correlationId: request.id,
+        };
+      } catch (error) {
+        request.log.error(
+          { err: error, verificationCode: normalizedCode },
+          'Certificate verification failed',
+        );
+        return reply.status(500).send({
+          message: 'Unable to verify this certificate right now.',
+          correlationId: request.id,
+        });
+      }
+    },
+  );
 
   app.get('/raffle-entries', { preHandler: requireScholarAccess }, async (request) =>
     learning.listRaffleEntries(request.user!.uid),
