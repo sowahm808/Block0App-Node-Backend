@@ -54,6 +54,57 @@ const toIsoDate = (value: unknown) => {
   return null;
 };
 
+const CURRENT_RAFFLE = {
+  name: 'July Scholar Momentum Drawing',
+  drawingDate: '2026-07-31',
+  rulesUrl: '/rewards/raffle-rules',
+};
+
+const raffleSourceActivityMap: Record<string, string> = {
+  'daily-check-in': 'Daily Check-in',
+  'capsule-completion': 'Capsule Completion',
+  'capsule-target': 'Capsule Completion',
+};
+
+const normalizeRaffleEntry = (entry: any) => {
+  const source = String(entry.sourceActivity ?? entry.source ?? 'Capsule Completion');
+  const sourceActivity = raffleSourceActivityMap[source] ?? source;
+  return {
+    id: String(entry.id),
+    entryReason: String(
+      entry.entryReason ??
+        entry.reason ??
+        entry.title ??
+        (sourceActivity === 'Capsule Completion'
+          ? 'Completed today’s capsule target'
+          : 'Completed an eligible scholar activity'),
+    ),
+    dateEarned: String(
+      entry.dateEarned ?? toIsoDate(entry.earnedAtUtc) ?? toIsoDate(entry.createdAtUtc) ?? '',
+    ),
+    sourceActivity,
+    raffleName: String(entry.raffleName ?? entry.raffleTitle ?? CURRENT_RAFFLE.name),
+    status: ['active', 'drawn', 'expired', 'void'].includes(entry.status) ? entry.status : 'active',
+  };
+};
+
+const buildRaffleEntriesResponse = (entries: any[]) => {
+  const normalizedEntries = entries.map(normalizeRaffleEntry);
+  const currentRaffle =
+    normalizedEntries.find((entry) => entry.status === 'active')?.raffleName ?? CURRENT_RAFFLE.name;
+  return {
+    summary: {
+      totalActiveEntries: normalizedEntries.filter(
+        (entry) => entry.status === 'active' && entry.raffleName === currentRaffle,
+      ).length,
+      currentRaffle: normalizedEntries.length ? currentRaffle : 'No active raffle',
+      drawingDate: CURRENT_RAFFLE.drawingDate,
+      rulesUrl: CURRENT_RAFFLE.rulesUrl,
+    },
+    entries: normalizedEntries,
+  };
+};
+
 const normalizeReward = (reward: any) => ({
   id: String(reward.id),
   name: String(reward.name ?? reward.title ?? 'Reward'),
@@ -1216,10 +1267,17 @@ export class LearningRepository {
     return certificates.length ? certificates : sampleCertificates;
   }
 
-  async listRaffleEntries() {
-    const snapshot = await this.db.collection('raffleEntries').get();
-    const raffleEntries = snapshot.docs.map((doc) => doc.data());
-    return raffleEntries.length ? raffleEntries : sampleRaffleEntries;
+  async listRaffleEntries(scholarId?: string) {
+    const snapshot = scholarId
+      ? await this.db.collection('raffleEntries').where('scholarId', '==', scholarId).get()
+      : await this.db.collection('raffleEntries').get();
+    const raffleEntries = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const fallbackEntries = scholarId
+      ? sampleRaffleEntries.filter(
+          (entry: any) => entry.scholarId === scholarId || entry.userId === scholarId,
+        )
+      : sampleRaffleEntries;
+    return buildRaffleEntriesResponse(raffleEntries.length ? raffleEntries : fallbackEntries);
   }
 
   private async listCollectionOrSeed(collectionName: string, fallback: any[]) {

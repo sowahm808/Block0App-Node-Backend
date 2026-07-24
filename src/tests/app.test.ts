@@ -489,7 +489,6 @@ describe('MindUnlocking API', () => {
       '/admin/reports',
       '/admin/audit',
       '/certificates',
-      '/raffle-entries',
       '/mentor/dashboard',
       '/review/dashboard',
       '/review/scenarios',
@@ -615,15 +614,33 @@ describe('MindUnlocking API', () => {
     expect(legacyCertificates.statusCode).toBe(200);
     expect(legacyCertificates.json().data).toEqual(certificates.json().data);
 
-    const raffleEntries = await app.inject('/api/v1/raffle-entries');
+    const raffleEntries = await app.inject({
+      method: 'GET',
+      url: '/api/v1/raffle-entries',
+      headers: { authorization: `Bearer ${scholarAccess.token}` },
+    });
     expect(raffleEntries.statusCode).toBe(200);
-    expect(raffleEntries.json().data[0]).toMatchObject({
+    expect(raffleEntries.json().summary).toMatchObject({
+      totalActiveEntries: 1,
+      currentRaffle: 'July Scholar Momentum Drawing',
+      drawingDate: '2026-07-31',
+      rulesUrl: '/rewards/raffle-rules',
+    });
+    expect(raffleEntries.json().entries[0]).toMatchObject({
       id: 'raffle-entry-daily-check-in-seed-scholar',
+      entryReason: 'Daily Check-in Raffle Entry',
+      dateEarned: '2026-01-01',
+      sourceActivity: 'Daily Check-in',
+      raffleName: 'July Scholar Momentum Drawing',
       status: 'active',
     });
-    const legacyRaffleEntries = await app.inject('/raffle-entries');
+    const legacyRaffleEntries = await app.inject({
+      method: 'GET',
+      url: '/raffle-entries',
+      headers: { authorization: `Bearer ${scholarAccess.token}` },
+    });
     expect(legacyRaffleEntries.statusCode).toBe(200);
-    expect(legacyRaffleEntries.json().data).toEqual(raffleEntries.json().data);
+    expect(legacyRaffleEntries.json()).toEqual(raffleEntries.json());
 
     const learningPackHeaders = {
       authorization: `Bearer ${token({ uid: 'seed-scholar', email: 'learner@example.com', email_verified: true, permissions: ['scholar:access'] })}`,
