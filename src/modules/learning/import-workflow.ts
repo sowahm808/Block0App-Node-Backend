@@ -136,7 +136,8 @@ export class LearningPackImportService {
       const status = validationErrors.length ? 'needs_review' : 'validated';
       const extractedText = extracted.text.length <= 300_000 ? extracted.text : undefined;
       const extractedTextPreview = extracted.text.slice(0, 10_000);
-      const extractedTextStoragePath = extractedText ? undefined : `${storagePath}.txt`;
+      const extractedTextStoragePath =
+        extractedText === undefined ? `${storagePath}.txt` : undefined;
       if (extractedTextStoragePath)
         await this.storage
           .bucket(this.bucketName)
@@ -148,9 +149,10 @@ export class LearningPackImportService {
         validationErrors,
         extractionWarnings: [...extracted.warnings, ...parsed.warnings],
         extractionMetadata: { ...extracted.metadata, durationMs: Date.now() - started },
-        extractedText,
         extractedTextPreview,
-        extractedTextStoragePath,
+        ...(extractedText === undefined
+          ? { extractedTextStoragePath }
+          : { extractedText }),
         updatedAtUtc: new Date().toISOString(),
       });
       return {
