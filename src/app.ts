@@ -215,7 +215,7 @@ export async function buildApp(overrides?: any) {
             );
             const question = seed.sampleQuestions.find(
               (item) => item.id === questionAttempt?.questionId,
-            );
+            ) as any;
             return attempt && capsule && questionAttempt && question
               ? {
                   capsuleAttemptId,
@@ -230,11 +230,24 @@ export async function buildApp(overrides?: any) {
                   remainingSeconds: 600,
                   nextQuestion: {
                     attemptId: questionAttempt.id,
-                    stem: question.stem,
-                    choices: question.choices,
                     questionNumber: 1,
                     capsuleProgress: '1 of 4',
+                    stem: question.stem,
                     markedForReview: questionAttempt.markedForReview,
+                    choices: question.choices?.map((choice: any) => ({
+                      id: choice.id,
+                      label: choice.label,
+                      text: choice.text,
+                    })),
+                    answerType: question.answerType ?? 'single_answer',
+                    minSelections: question.minSelections,
+                    maxSelections: question.maxSelections,
+                    unit: question.unit,
+                    maxLength: question.maxLength,
+                    figureUrl: question.figureUrl,
+                    figureAlt: question.figureAlt,
+                    tableHtml: question.tableHtml,
+                    supportingMediaUrl: question.supportingMediaUrl,
                   },
                   complete: false,
                 }
@@ -251,7 +264,7 @@ export async function buildApp(overrides?: any) {
             );
             const explanation = seed.sampleQuestionExplanations.find(
               (item) => item.questionId === questionAttempt?.questionId,
-            );
+            ) as any;
             return explanation
               ? {
                   selectedChoiceId: body.choiceId,
@@ -259,11 +272,17 @@ export async function buildApp(overrides?: any) {
                   correctChoiceId: explanation.correctChoiceId,
                   correctRationale: explanation.correctRationale,
                   incorrectRationales: explanation.incorrectRationales,
+                  referenceTitle: explanation.referenceTitle,
                   reference: explanation.reference,
+                  referenceUrl: explanation.referenceUrl,
                   memory: explanation.memory,
                 }
               : null;
           },
+          acknowledgeMemory: async () => ({
+            acknowledged: true,
+            acknowledgedAtUtc: new Date().toISOString(),
+          }),
           advanceCapsuleAttempt: async (capsuleAttemptId: string) => ({
             capsuleAttemptId,
             complete: true,
