@@ -2308,9 +2308,19 @@ describe('check-in history', () => {
       method: 'PUT',
       url: '/api/v1/settings',
       headers: { authorization: auth },
-      payload: { appearance: { theme: 'Blue' }, studyPreferences: { defaultDailyGoal: 201 } },
+      payload: {
+        appearance: { theme: 'Blue', unsupported: true },
+        studyPreferences: { defaultDailyGoal: 201 },
+        unexpected: true,
+      },
     });
     expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toMatchObject({
+      status: 400,
+      message: 'Request validation failed',
+      correlationId: expect.any(String),
+      validationErrors: expect.any(Object),
+    });
 
     const summary = await app.inject({
       method: 'GET',
