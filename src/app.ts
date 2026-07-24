@@ -9,7 +9,6 @@ import { loggerOptions } from './modules/common/logger.js';
 import { errorHandler } from './modules/common/problem-details.js';
 import { registerSecurity } from './modules/common/security-headers.js';
 import { registerRateLimit } from './modules/common/rate-limit.js';
-import { authenticate } from './modules/common/auth-middleware.js';
 import { UsersRepository } from './modules/users/users.repository.js';
 import { AuthRepository } from './modules/auth/auth.repository.js';
 import { AuthService } from './modules/auth/auth.service.js';
@@ -21,6 +20,8 @@ import { learningRoutes } from './modules/learning/learning.routes.js';
 import { NotificationsRepository } from './modules/notifications/notifications.repository.js';
 import { notificationsRoutes } from './modules/notifications/notifications.routes.js';
 import { adminRoutes } from './modules/learning/admin.routes.js';
+import { ProfileService } from './modules/profile/profile.service.js';
+import { profileRoutes } from './modules/profile/profile.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -656,7 +657,19 @@ export async function buildApp(overrides?: any) {
   if (overrides?.seedLearning !== false && typeof learning.seedAll === 'function') {
     await learning.seedAll();
   }
-  const profile = { preHandler: authenticate(authService) };
+  const profileService =
+    overrides?.profile ??
+    (users
+      ? new ProfileService(users, getFirebase().storage, getFirebase().storageBucket)
+      : {
+          getProfile: async (_userId: string, authenticatedUser: any) => authenticatedUser,
+          updateProfile: async () => {
+            throw new Error('Profile repository is not configured.');
+          },
+          updateImage: async () => {
+            throw new Error('Profile repository is not configured.');
+          },
+        });
   const meta = {
     name: 'MindUnlocking API',
     version: 'v1',
@@ -690,7 +703,11 @@ export async function buildApp(overrides?: any) {
   app.get('/health/ready', async () => readiness.ready());
   await app.register(
     async (v1) => {
-      v1.get('/profile', profile, async (req) => req.user);
+      await v1.register(profileRoutes, {
+        prefix: '/profile',
+        authService,
+        profile: profileService,
+      } as any);
       await v1.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await v1.register(learningRoutes, { learning, authService, users } as any);
@@ -712,7 +729,11 @@ export async function buildApp(overrides?: any) {
   );
   await app.register(
     async (api) => {
-      api.get('/profile', profile, async (req) => req.user);
+      await api.register(profileRoutes, {
+        prefix: '/profile',
+        authService,
+        profile: profileService,
+      } as any);
       await api.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await api.register(learningRoutes, { learning, authService, users } as any);
@@ -732,6 +753,11 @@ export async function buildApp(overrides?: any) {
     },
     { prefix: '/api' },
   );
+  await app.register(profileRoutes, {
+    prefix: '/profile',
+    authService,
+    profile: profileService,
+  } as any);
   await app.register(learningRoutes, { learning, authService, users } as any);
   return app;
 }
