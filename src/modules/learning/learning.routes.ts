@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { NotFoundError, ForbiddenError } from '../common/errors.js';
+import { NotFoundError, ForbiddenError, ValidationAppError } from '../common/errors.js';
 import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -205,6 +205,34 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   app.get('/readiness', async () => ({ data: await learning.getReadiness() }));
 
   app.get('/readiness/prompts', async () => ({ data: await learning.listReadinessPrompts() }));
+
+  app.post(
+    '/capsules/:capsuleId/start',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const { capsuleId } = request.params as { capsuleId: string };
+      const idempotencyKey = request.headers['idempotency-key'];
+      const normalizedKey = Array.isArray(idempotencyKey) ? idempotencyKey[0] : idempotencyKey;
+      if (!normalizedKey || !String(normalizedKey).trim()) {
+        throw new ValidationAppError({ idempotencyKey: ['Idempotency-Key header is required'] });
+      }
+      const result = await learning.startCapsuleAttempt(
+        request.user?.uid,
+        capsuleId,
+        String(normalizedKey),
+      );
+      if (result === 'forbidden') throw new ForbiddenError('Capsule is not visible');
+      if (!result) throw new NotFoundError('Capsule not found');
+      if ('activeAttemptId' in result) {
+        return reply.status(409).send({
+          message: 'You already have an active attempt.',
+          capsuleAttemptId: result.activeAttemptId,
+          activeAttemptId: result.activeAttemptId,
+        });
+      }
+      return reply.status(result.created ? 201 : 200).send({ data: result.response });
+    },
+  );
 
   app.get('/capsule-attempts/:capsuleAttemptId/resume', async (request) => {
     const { capsuleAttemptId } = request.params as { capsuleAttemptId: string };
