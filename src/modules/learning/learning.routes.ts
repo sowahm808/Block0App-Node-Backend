@@ -60,18 +60,6 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     }
   };
 
-  const listPublishedChallenges = async () => ({ data: await learning.listChallenges() });
-
-  app.get('/challenges', listPublishedChallenges);
-
-  app.get('/scenarios', listPublishedChallenges);
-
-  app.get('/scenarios/available', listPublishedChallenges);
-
-  app.get('/rehearsals', listPublishedChallenges);
-
-  app.get('/rehearsals/available', listPublishedChallenges);
-
   const requireScholarAccess = async (request: any) => {
     await requireAuth(request);
     const permissions = request.user?.permissions ?? [];
@@ -79,6 +67,118 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
       throw new ForbiddenError('Scholar access is required');
     }
   };
+
+  const listPublishedChallenges = async () => ({ data: await learning.listChallenges() });
+
+  app.get('/challenges', listPublishedChallenges);
+
+  app.get(
+    '/scenarios',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) =>
+      (learning as any).listClinicalScenarios(request.user?.uid ?? 'anonymous-scholar'),
+  );
+
+  app.get(
+    '/scenarios/:scenarioId',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { scenarioId } = request.params as { scenarioId: string };
+      const scenario = await (learning as any).getClinicalScenario(scenarioId);
+      if (!scenario) throw new NotFoundError('Clinical scenario not found');
+      return scenario;
+    },
+  );
+
+  app.post(
+    '/scenarios/:scenarioId/attempts',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request, reply) => {
+      const { scenarioId } = request.params as { scenarioId: string };
+      const attempt = await (learning as any).createOrResumeScenarioAttempt(
+        request.user?.uid ?? 'anonymous-scholar',
+        scenarioId,
+      );
+      if (!attempt) throw new NotFoundError('Clinical scenario not found');
+      return reply.status(201).send(attempt);
+    },
+  );
+
+  app.get(
+    '/scenario-attempts/:attemptId',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const attempt = await (learning as any).getScenarioAttempt(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+      );
+      if (attempt === 'forbidden')
+        throw new ForbiddenError('Scenario attempt belongs to another scholar');
+      if (!attempt) throw new NotFoundError('Scenario attempt not found');
+      return attempt;
+    },
+  );
+
+  app.post(
+    '/scenario-attempts/:attemptId/answers',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const attempt = await (learning as any).answerScenarioAttempt(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+        request.body ?? {},
+      );
+      if (attempt === 'forbidden')
+        throw new ForbiddenError('Scenario attempt belongs to another scholar');
+      if (!attempt) throw new NotFoundError('Scenario attempt not found');
+      return attempt;
+    },
+  );
+
+  app.post(
+    '/scenario-attempts/:attemptId/submit',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const result = await (learning as any).submitScenarioAttempt(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+      );
+      if (result === 'forbidden')
+        throw new ForbiddenError('Scenario attempt belongs to another scholar');
+      if (!result) throw new NotFoundError('Scenario attempt not found');
+      return result;
+    },
+  );
+
+  app.get(
+    '/scenario-attempts/:attemptId/review',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const review = await (learning as any).getScenarioAttemptReview(
+        request.user?.uid ?? 'anonymous-scholar',
+        attemptId,
+      );
+      if (review === 'forbidden')
+        throw new ForbiddenError('Scenario attempt belongs to another scholar');
+      if (!review) throw new NotFoundError('Scenario attempt review not found');
+      return review;
+    },
+  );
+
+  app.get(
+    '/scenarios/available',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) =>
+      (learning as any).listClinicalScenarios(request.user?.uid ?? 'anonymous-scholar'),
+  );
+
+  app.get('/rehearsals', listPublishedChallenges);
+
+  app.get('/rehearsals/available', listPublishedChallenges);
 
   app.get(
     '/challenges/current/program',
