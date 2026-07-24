@@ -175,6 +175,8 @@ export async function buildApp(overrides?: any) {
             (await import('./modules/learning/learning.seed.js')).sampleSupportRequests,
           getDashboard: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleDashboard,
+          getScholarDashboard: async () =>
+            (await import('./modules/learning/learning.seed.js')).sampleDashboard,
           getReadiness: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleReadiness,
           listReadinessPrompts: async () =>

@@ -406,10 +406,10 @@ describe('MindUnlocking API', () => {
     const currentToday = await app.inject('/api/v1/challenges/current/today');
     expect(currentToday.statusCode).toBe(200);
     expect(currentToday.json().data).toMatchObject({
-      currentDay: 1,
+      currentDay: 5,
       totalDays: 21,
       challenge: { slug: 'block-zero-21-day-medical-exam-prep' },
-      day: { challengeId: 'block-zero-21-day-medical-exam-prep', day: 1 },
+      day: { challengeId: 'block-zero-21-day-medical-exam-prep', day: 5 },
     });
 
     for (const path of [
@@ -426,7 +426,6 @@ describe('MindUnlocking API', () => {
       '/rewards',
       '/certificates',
       '/raffle-entries',
-      '/dashboard',
       '/mentor/dashboard',
       '/review/dashboard',
       '/review/scenarios',
@@ -440,6 +439,24 @@ describe('MindUnlocking API', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const scholarAccess = await svc.signAccessToken('seed-scholar', 'scholar@example.com', [
+      'scholar:access',
+    ]);
+    const dashboard = await app.inject({
+      method: 'GET',
+      url: '/api/v1/dashboard',
+      headers: { authorization: `Bearer ${scholarAccess.token}` },
+    });
+    expect(dashboard.statusCode).toBe(200);
+    expect(dashboard.json().data).toMatchObject({
+      enrollmentState: 'active',
+      scholarName: 'Michael',
+      dailyQuestionTarget: 60,
+      academicScore: 84,
+      engagementScore: 91,
+      recentActivity: expect.arrayContaining(['Capsule completed: ECG Basics']),
+    });
 
     const adminAccess = await svc.signAccessToken('admin-user', 'admin@example.com', [
       'admin.system.read',
@@ -1013,6 +1030,120 @@ describe('MindUnlocking API', () => {
 
     expect(orderByCalled).toBe(false);
     expect(days.map((day: any) => day.day)).toEqual([1, 2, 3]);
+  });
+
+  it('builds scholar dashboards for each enrollment state', async () => {
+    const makeRepo = (collections: Record<string, any[]>) => {
+      const db = {
+        collection(name: string) {
+          let rows = collections[name] ?? [];
+          const query = {
+            where(field: string, _operator: string, value: string) {
+              rows = rows.filter((row) => row[field] === value);
+              return query;
+            },
+            limit() {
+              return query;
+            },
+            async get() {
+              return { empty: rows.length === 0, docs: rows.map((row) => ({ data: () => row })) };
+            },
+          };
+          return query;
+        },
+      };
+      return new LearningRepository(db as any);
+    };
+
+    await expect(makeRepo({ enrollments: [] }).getScholarDashboard('scholar-a')).resolves.toEqual({
+      enrollmentState: 'not_enrolled',
+    });
+
+    const future = new Date(Date.now() + 2 * 86400000).toISOString();
+    await expect(
+      makeRepo({
+        enrollments: [
+          {
+            scholarId: 'scholar-a',
+            status: 'active',
+            startDate: future,
+            scholarName: 'Ada',
+            preparationChecklist: ['Confirm study calendar'],
+          },
+        ],
+      }).getScholarDashboard('scholar-a'),
+    ).resolves.toMatchObject({
+      enrollmentState: 'not_started',
+      scholarName: 'Ada',
+      startDate: future,
+      countdown: { days: expect.any(Number) },
+      preparationChecklist: ['Confirm study calendar'],
+    });
+
+    await expect(
+      makeRepo({
+        enrollments: [
+          {
+            scholarId: 'scholar-a',
+            status: 'completed',
+            completionMessage: 'You finished!',
+            certificateStatus: 'issued',
+            finalReadiness: 'Exam Ready',
+          },
+        ],
+      }).getScholarDashboard('scholar-a'),
+    ).resolves.toMatchObject({
+      enrollmentState: 'completed',
+      completionMessage: 'You finished!',
+      certificateStatus: 'issued',
+      finalReadiness: 'Exam Ready',
+    });
+
+    await expect(
+      makeRepo({
+        enrollments: [{ scholarId: 'scholar-a', status: 'active', currentDay: 5 }],
+        dashboard: [{ scholarName: 'Michael', academicScore: 84, engagementScore: 91 }],
+        checkIns: [
+          { scholarId: 'scholar-a', type: 'morning', createdAtUtc: new Date().toISOString() },
+        ],
+        rewardsEarned: [{ scholarId: 'scholar-a' }, { scholarId: 'scholar-a' }],
+        raffleEntries: [{ scholarId: 'scholar-a' }],
+        activityFeed: [{ scholarId: 'scholar-a', message: 'Capsule completed: ECG Basics' }],
+      }).getScholarDashboard('scholar-a'),
+    ).resolves.toMatchObject({
+      enrollmentState: 'active',
+      scholarName: 'Michael',
+      currentDay: 5,
+      dailyTarget: 15,
+      dailyQuestionTarget: 60,
+      morningCheckInDone: true,
+      rewardsEarned: 2,
+      raffleEntries: 1,
+      recentActivity: ['Capsule completed: ECG Basics'],
+    });
+  });
+
+  it('requires scholar access for the scholar dashboard endpoint', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const noToken = await app.inject('/api/v1/dashboard');
+    expect(noToken.statusCode).toBe(401);
+
+    const adminAccess = await svc.signAccessToken('admin-user', 'admin@example.com', [
+      'admin:content',
+    ]);
+    const adminResponse = await app.inject({
+      method: 'GET',
+      url: '/api/v1/dashboard',
+      headers: { authorization: `Bearer ${adminAccess.token}` },
+    });
+    expect(adminResponse.statusCode).toBe(403);
   });
 
   it('removes undefined fields before writing imported learning content to Firestore', async () => {
