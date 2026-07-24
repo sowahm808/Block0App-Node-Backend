@@ -123,7 +123,7 @@ export async function buildApp(overrides?: any) {
               continueUrl: dashboard.continueUrl,
               currentCapsuleUrl: dashboard.continueUrl,
               locked: false,
-              assignedLearningPacks: seed.sampleLearningPacks.map((pack, index) => ({
+              assignedLearningPacks: seed.sampleLearningPacks.slice(0, 1).map((pack, index) => ({
                 id: pack.id,
                 packNumber: index + 1,
                 title: pack.title,

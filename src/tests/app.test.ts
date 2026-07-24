@@ -441,7 +441,6 @@ describe('MindUnlocking API', () => {
       '/teams',
       '/mentor/teams',
       '/mentor/support-requests',
-      '/learning-packs',
       '/admin/challenges',
       '/admin/cohorts',
       '/admin/learning-packs',
@@ -464,6 +463,15 @@ describe('MindUnlocking API', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const learningPacks = await app.inject({
+      url: '/api/v1/learning-packs',
+      headers: {
+        authorization: `Bearer ${token({ uid: 'seed-scholar', email: 'learner@example.com', email_verified: true, permissions: ['scholar:access'] })}`,
+      },
+    });
+    expect(learningPacks.statusCode).toBe(200);
+    expect(learningPacks.json()).toEqual(expect.any(Array));
 
     const scholarAccess = await svc.signAccessToken('seed-scholar', 'scholar@example.com', [
       'scholar:access',
@@ -530,10 +538,16 @@ describe('MindUnlocking API', () => {
     expect(legacyRaffleEntries.statusCode).toBe(200);
     expect(legacyRaffleEntries.json().data).toEqual(raffleEntries.json().data);
 
-    const legacyLearningPacks = await app.inject('/learning-packs');
+    const learningPackHeaders = {
+      authorization: `Bearer ${token({ uid: 'seed-scholar', email: 'learner@example.com', email_verified: true, permissions: ['scholar:access'] })}`,
+    };
+    const legacyLearningPacks = await app.inject({
+      url: '/learning-packs',
+      headers: learningPackHeaders,
+    });
     expect(legacyLearningPacks.statusCode).toBe(200);
-    expect(legacyLearningPacks.json().data).toEqual(
-      (await app.inject('/api/v1/learning-packs')).json().data,
+    expect(legacyLearningPacks.json()).toEqual(
+      (await app.inject({ url: '/api/v1/learning-packs', headers: learningPackHeaders })).json(),
     );
 
     const reviewContent = await app.inject('/api/v1/review/content');

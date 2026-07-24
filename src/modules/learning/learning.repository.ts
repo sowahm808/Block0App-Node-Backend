@@ -10,6 +10,7 @@ import {
   sampleQuestionExplanations,
   sampleCapsuleAttempts,
   sampleQuestionAttempts,
+  sampleAssignments,
   sampleReadiness,
   sampleReadinessPrompts,
   sampleContentReviews,
@@ -76,6 +77,28 @@ const PROGRAM_PHASES = [
 const SCENARIO_VOLUMES: Record<number, number> = { 15: 10, 16: 20, 17: 40, 18: 60 };
 
 const isoOrUndefined = (value: unknown) => toDate(value)?.toISOString();
+
+type LearningPackListQuery = {
+  search?: string;
+  topic?: string;
+  status?: string;
+  availability?: string;
+  sort?: string;
+};
+
+const normalizeFilterValue = (value: unknown) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/-/g, '_');
+
+const slugValue = (value: unknown) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 
 const dayStartInTimeZoneUtc = (date: Date, timeZone: string) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -489,13 +512,203 @@ export class LearningRepository {
     return raffleEntries.length ? raffleEntries : sampleRaffleEntries;
   }
 
-  async listLearningPacks() {
-    const snapshot = await this.db
-      .collection('learningPacks')
-      .where('status', '==', 'published')
-      .get();
-    const learningPacks = snapshot.docs.map((doc) => doc.data());
-    return learningPacks.length ? learningPacks : sampleLearningPacks;
+  private async listCollectionOrSeed(collectionName: string, fallback: any[]) {
+    const snapshot = await this.db.collection(collectionName).get();
+    const rows = snapshot.docs.map((doc) => doc.data() as any);
+    return rows.length ? rows : fallback;
+  }
+
+  async listLearningPacks(scholarId?: string, query: LearningPackListQuery = {}) {
+    const [allPacks, capsules, questions, capsuleAttempts, questionAttempts, assignments] =
+      await Promise.all([
+        this.listCollectionOrSeed('learningPacks', sampleLearningPacks),
+        this.listCollectionOrSeed('capsules', sampleCapsules),
+        this.listCollectionOrSeed('questions', sampleQuestions),
+        this.listCollectionOrSeed('capsuleAttempts', sampleCapsuleAttempts),
+        this.listCollectionOrSeed('questionAttempts', sampleQuestionAttempts),
+        this.listCollectionOrSeed('assignments', sampleAssignments),
+      ]);
+    const now = new Date();
+    const hasAssignments = assignments.length > 0;
+    const visiblePackIds = new Set(
+      assignments
+        .filter((assignment: any) => !scholarId || assignment.targetId === scholarId)
+        .map((assignment: any) => assignment.learningPackId),
+    );
+
+    let packs = allPacks.filter(
+      (pack: any) =>
+        pack.status === 'published' &&
+        (!hasAssignments || visiblePackIds.has(pack.id) || !scholarId),
+    );
+
+    const mapped = packs.map((pack: any, index: number) => {
+      const packCapsules = capsules.filter((capsule: any) => capsule.learningPackId === pack.id);
+      const packCapsuleIds = new Set(packCapsules.map((capsule: any) => capsule.id));
+      const packQuestions = questions.filter((question: any) =>
+        packCapsuleIds.has(question.capsuleId),
+      );
+      const packQuestionIds = new Set(packQuestions.map((question: any) => question.id));
+      const scholarCapsuleAttempts = capsuleAttempts.filter(
+        (attempt: any) =>
+          (!scholarId || attempt.scholarId === scholarId) && packCapsuleIds.has(attempt.capsuleId),
+      );
+      const scholarQuestionAttempts = questionAttempts.filter(
+        (attempt: any) =>
+          packQuestionIds.has(attempt.questionId) &&
+          scholarCapsuleAttempts.some(
+            (capsuleAttempt: any) => capsuleAttempt.id === attempt.capsuleAttemptId,
+          ),
+      );
+      const totalCapsules = Number(pack.capsuleCount ?? packCapsules.length) || 0;
+      const totalQuestions = Number(pack.questionCount ?? packQuestions.length) || 0;
+      const completedCapsules = scholarCapsuleAttempts.filter(
+        (attempt: any) => attempt.completedAtUtc,
+      ).length;
+      const completedQuestions = scholarQuestionAttempts.filter(
+        (attempt: any) => attempt.submittedAtUtc,
+      ).length;
+      const correctQuestions = scholarQuestionAttempts.filter(
+        (attempt: any) => attempt.submittedAtUtc && attempt.correct === true,
+      ).length;
+      const releaseAt = toDate(pack.releaseAtUtc ?? pack.publishAtUtc);
+      const prerequisitesMet = pack.prerequisitesMet !== false && pack.locked !== true;
+      const released = !releaseAt || releaseAt <= now;
+      const availability = !prerequisitesMet ? 'locked' : released ? 'available' : 'coming_soon';
+      const complete =
+        (totalCapsules > 0 && completedCapsules >= totalCapsules) ||
+        (totalQuestions > 0 && completedQuestions >= totalQuestions);
+      const started = scholarCapsuleAttempts.length > 0 || scholarQuestionAttempts.length > 0;
+      const progressStatus =
+        availability === 'locked'
+          ? 'locked'
+          : complete
+            ? 'completed'
+            : started
+              ? 'in_progress'
+              : 'not_started';
+      const progressPercentage =
+        totalQuestions > 0
+          ? clampPercentage((completedQuestions / totalQuestions) * 100)
+          : totalCapsules > 0
+            ? clampPercentage((completedCapsules / totalCapsules) * 100)
+            : 0;
+      const accuracyPermitted =
+        availability === 'available' && completedQuestions > 0 && pack.hideAccuracy !== true;
+      const currentAttempt =
+        scholarCapsuleAttempts.find((attempt: any) => !attempt.completedAtUtc) ??
+        scholarCapsuleAttempts[0];
+      const topic =
+        pack.topic ??
+        pack.subject ??
+        this.phaseTitleForDay(Number(pack.dayNumber ?? pack.studyDay) || 1);
+      return {
+        id: pack.id,
+        externalId: pack.externalId ?? pack.slug ?? pack.id,
+        code:
+          pack.code ??
+          (pack.dayNumber ? `LP${String(pack.dayNumber).padStart(2, '0')}` : undefined),
+        title: pack.title,
+        topic,
+        description: pack.description ?? '',
+        objectivesSummary:
+          pack.objectivesSummary ?? pack.objectiveSummary ?? pack.description ?? pack.title,
+        status: progressStatus,
+        progressStatus,
+        availability,
+        availabilityStatus: availability,
+        estimatedMinutes:
+          Number(
+            pack.estimatedMinutes ??
+              packCapsules.reduce(
+                (sum: number, capsule: any) => sum + Number(capsule.estimatedMinutes || 0),
+                0,
+              ),
+          ) || undefined,
+        capsuleCount: totalCapsules,
+        totalCapsules,
+        completedCapsules,
+        questionCount: totalQuestions,
+        totalQuestions,
+        completedQuestions,
+        accuracyPermitted,
+        ...(accuracyPermitted
+          ? { accuracyPercentage: clampPercentage((correctQuestions / completedQuestions) * 100) }
+          : {}),
+        progressPercentage,
+        ...(availability === 'available'
+          ? {
+              continueUrl: currentAttempt
+                ? `/capsules/${currentAttempt.id}`
+                : `/learning-packs/${pack.id}`,
+            }
+          : {}),
+        tags: pack.tags ?? [],
+        dayNumber: pack.dayNumber,
+        recommendedRank: Number(pack.recommendedRank ?? pack.dayNumber ?? index),
+      };
+    });
+
+    const search = String(query.search ?? '')
+      .trim()
+      .toLowerCase();
+    const topic = slugValue(query.topic);
+    const status = normalizeFilterValue(query.status || 'all');
+    const availability = normalizeFilterValue(query.availability || 'all');
+    const filtered = mapped.filter((pack: any) => {
+      const searchable = [
+        pack.code,
+        pack.title,
+        pack.topic,
+        pack.objectivesSummary,
+        pack.description,
+        ...(pack.tags ?? []),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return (
+        (!search || searchable.includes(search)) &&
+        (!topic || slugValue(pack.topic) === topic) &&
+        (status === 'all' || pack.progressStatus === status) &&
+        (availability === 'all' || pack.availabilityStatus === availability)
+      );
+    });
+
+    const sort = normalizeFilterValue(query.sort || 'recommended');
+    return filtered
+      .sort((left: any, right: any) => {
+        if (sort === 'title') return left.title.localeCompare(right.title);
+        if (sort === 'topic')
+          return left.topic.localeCompare(right.topic) || left.title.localeCompare(right.title);
+        if (sort === 'progress_desc')
+          return (
+            right.progressPercentage - left.progressPercentage ||
+            left.title.localeCompare(right.title)
+          );
+        if (sort === 'progress_asc')
+          return (
+            left.progressPercentage - right.progressPercentage ||
+            left.title.localeCompare(right.title)
+          );
+        const statusRank: Record<string, number> = {
+          in_progress: 0,
+          not_started: 1,
+          completed: 2,
+          locked: 3,
+        };
+        const availabilityRank: Record<string, number> = {
+          available: 0,
+          locked: 1,
+          coming_soon: 2,
+        };
+        return (
+          availabilityRank[left.availabilityStatus] - availabilityRank[right.availabilityStatus] ||
+          statusRank[left.progressStatus] - statusRank[right.progressStatus] ||
+          left.recommendedRank - right.recommendedRank ||
+          left.title.localeCompare(right.title)
+        );
+      })
+      .map(({ recommendedRank, ...pack }: any) => pack);
   }
 
   async resumeCapsuleAttempt(capsuleAttemptId: string) {
