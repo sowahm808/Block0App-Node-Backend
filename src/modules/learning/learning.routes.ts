@@ -9,7 +9,7 @@ import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { LearningRepository } from './learning.repository.js';
-import { checkInSchema, morningCheckInSchema } from './check-ins.schemas.js';
+import { checkInSchema, eveningCheckInSchema, morningCheckInSchema } from './check-ins.schemas.js';
 
 type LearningRoutesOptions = {
   learning: LearningRepository;
@@ -125,6 +125,20 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
       return reply.status(result.created ? 201 : 200).send(result.data);
     },
   );
+
+  app.get('/check-ins/evening/summary', { preHandler: requireScholarAccess }, async (request) => ({
+    data: await (learning as any).getEveningCheckInSummary(request.user!.uid),
+  }));
+
+  app.post('/check-ins/evening', { preHandler: requireScholarAccess }, async (request, reply) => {
+    const input = eveningCheckInSchema.parse(request.body);
+    const result = await (learning as any).saveEveningCheckIn(request.user!.uid, input);
+    if (result?.status === 'not_found') throw new NotFoundError('Current challenge day not found');
+    if (result?.status === 'validation_error') throw new ValidationAppError(result.errors);
+    if (result?.status === 'conflict')
+      throw new ConflictError('Evening check-in already completed');
+    return reply.status(result.created ? 201 : 200).send(result.data);
+  });
 
   app.get('/challenges/:slugOrId', async (request) => {
     const { slugOrId } = request.params as { slugOrId: string };

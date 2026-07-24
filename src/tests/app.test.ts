@@ -1198,6 +1198,98 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('returns authenticated scholar evening check-in summaries from tracked activity', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-evening-summary', 'evening-summary@example.com', [
+      'scholar:access',
+    ]);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/check-ins/evening/summary',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      data: {
+        capsulesCompletedToday: 3,
+        questionsCompletedToday: 42,
+        studyTimeRecordedMinutes: 95,
+        questionsMarkedForReview: 6,
+      },
+    });
+  });
+
+  it('completes authenticated scholar evening check-ins without manual progress counts', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-evening-check-in', 'evening@example.com', [
+      'scholar:access',
+    ]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/check-ins/evening',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: {
+        confidence: 8,
+        goal: 4,
+        goalMet: 'Partially',
+        supportGivenToday: 2,
+        supportReceivedToday: 1,
+        reflection: 'I finished the highest-priority capsules.',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      id: 'evening-check-in-test',
+      kind: 'evening',
+      status: 'complete',
+      message: 'Evening check-in complete. See you tomorrow.',
+    });
+  });
+
+  it('rejects manually supplied evening progress counts', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-evening-reject', 'evening-reject@example.com', [
+      'scholar:access',
+    ]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/check-ins/evening',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: {
+        confidence: 8,
+        goal: 4,
+        goalMet: 'Yes',
+        capsulesCompletedToday: 999,
+        questionsCompletedToday: 999,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
   it('returns field validation errors for morning check-in goals outside the active range', async () => {
     const app = await buildApp({
       authService: svc,

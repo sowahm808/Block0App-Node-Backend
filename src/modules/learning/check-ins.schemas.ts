@@ -37,5 +37,20 @@ export const morningCheckInSchema = z.object({
   supportDescription: z.preprocess(emptyToUndefined, z.string().trim().max(500).optional()),
 });
 
+export const eveningGoalMetValues = ['Yes', 'Partially', 'No'] as const;
+
+export const eveningCheckInSchema = z
+  .object({
+    kind: z.literal('evening').optional().default('evening'),
+    confidence: z.number().int().min(1).max(10),
+    goal: z.number().int(),
+    goalMet: z.enum(eveningGoalMetValues),
+    supportGivenToday: z.number().int().min(0).optional().default(0),
+    supportReceivedToday: z.number().int().min(0).optional().default(0),
+    reflection: z.preprocess(emptyToUndefined, z.string().trim().max(500).optional()),
+  })
+  .strict();
+
 export type CheckInInput = z.infer<typeof checkInSchema>;
 export type MorningCheckInInput = z.infer<typeof morningCheckInSchema>;
+export type EveningCheckInInput = z.infer<typeof eveningCheckInSchema>;
