@@ -582,26 +582,46 @@ describe('MindUnlocking API', () => {
       },
     });
 
-    const resume = await app.inject(
-      '/api/v1/capsule-attempts/attempt-day-01-capsule-01-seed-scholar/resume',
-    );
-    expect(resume.statusCode).toBe(200);
-    expect(resume.json().data.question).toMatchObject({
-      id: 'bp-day-01-q001',
-      stem: expect.any(String),
-      choices: expect.any(Array),
+    const access = await svc.signAccessToken('seed-scholar', 'learner@example.com', [
+      'scholar:access',
+    ]);
+    const headers = { authorization: `Bearer ${access.token}` };
+    const resume = await app.inject({
+      url: '/api/v1/capsule-attempts/attempt-day-01-capsule-01-seed-scholar/resume',
+      headers,
     });
-    expect(JSON.stringify(resume.json().data.question)).not.toContain('correctChoiceId');
-    expect(JSON.stringify(resume.json().data.question)).not.toContain('correctRationale');
-    expect(JSON.stringify(resume.json().data.question)).not.toContain('incorrectRationales');
+    expect(resume.statusCode).toBe(200);
+    expect(resume.json()).toMatchObject({
+      capsuleAttemptId: 'attempt-day-01-capsule-01-seed-scholar',
+      title: expect.any(String),
+      learningPackTitle: expect.any(String),
+      capsuleNumber: 1,
+      questionCount: 4,
+      completedQuestions: 0,
+      remainingSeconds: expect.any(Number),
+      nextQuestion: {
+        attemptId: 'question-attempt-day-01-q001-seed-scholar',
+        stem: expect.any(String),
+        choices: expect.any(Array),
+        questionNumber: 1,
+        capsuleProgress: '1 of 4',
+        markedForReview: false,
+      },
+      complete: false,
+    });
+    expect(JSON.stringify(resume.json().nextQuestion)).not.toContain('correctChoiceId');
+    expect(JSON.stringify(resume.json().nextQuestion)).not.toContain('correctRationale');
+    expect(JSON.stringify(resume.json().nextQuestion)).not.toContain('incorrectRationales');
 
     const submit = await app.inject({
       method: 'POST',
       url: '/api/v1/capsule-attempts/attempt-day-01-capsule-01-seed-scholar/question-attempts/question-attempt-day-01-q001-seed-scholar/submit',
-      payload: { choiceId: 'A', elapsedMs: 1200 },
+      headers,
+      payload: { choiceId: 'A', elapsedMs: 1200, markedForReview: true },
     });
     expect(submit.statusCode).toBe(200);
-    expect(submit.json().data).toMatchObject({
+    expect(submit.json()).toMatchObject({
+      selectedChoiceId: 'A',
       correct: true,
       correctChoiceId: 'A',
       correctRationale: expect.any(String),
