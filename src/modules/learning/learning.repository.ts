@@ -2102,6 +2102,271 @@ export class LearningRepository {
     return { capsuleAttemptId, complete: false, nextQuestionAttemptId };
   }
 
+  private rehearsalReasonForQuestion(question: any, index: number) {
+    const tags = question.tags ?? [];
+    if (tags.includes('cardiology')) return 'weak_topic';
+    if (index % 3 === 1) return 'marked_for_review';
+    if (index % 3 === 2) return 'not_reviewed_recently';
+    return 'previously_incorrect';
+  }
+
+  private rehearsalTopicForQuestion(question: any) {
+    const tag = (question.tags ?? []).find((value: string) => value !== 'active-recall');
+    return tag
+      ? String(tag)
+          .replace(/-/g, ' ')
+          .replace(/\b\w/g, (letter) => letter.toUpperCase())
+      : 'General Review';
+  }
+
+  async listAvailableRehearsals(scholarId?: string) {
+    const [questions, explanations] = await Promise.all([
+      this.listCollectionOrSeed('questions', sampleQuestions),
+      this.listCollectionOrSeed('questionExplanations', sampleQuestionExplanations),
+    ]);
+    const explainedQuestionIds = new Set(
+      (explanations as any[]).map((item: any) => item.questionId),
+    );
+    const selected = (questions as any[])
+      .filter(
+        (question: any) => question.status !== 'draft' && explainedQuestionIds.has(question.id),
+      )
+      .slice(0, 12);
+    const reasons = selected.map((question, index) =>
+      this.rehearsalReasonForQuestion(question, index),
+    );
+    const weakTopics = new Set(
+      selected
+        .filter((question, index) => reasons[index] === 'weak_topic')
+        .map((question) => this.rehearsalTopicForQuestion(question)),
+    );
+    const attemptId = `rehearsal-attempt-${scholarId ?? 'anonymous'}-core-review`;
+    return {
+      summary: {
+        missedQuestions: reasons.filter((reason) => reason === 'previously_incorrect').length,
+        markedQuestions: reasons.filter((reason) => reason === 'marked_for_review').length,
+        weakTopics: weakTopics.size,
+        memoryPearlsDue: selected.length,
+      },
+      sessions: [
+        {
+          id: 'session_core_review',
+          attemptId,
+          title: 'Personalized rehearsal review',
+          questionCount: selected.length,
+          estimatedMinutes: Math.max(selected.length * 2, 5),
+          selectionReasons: [...new Set(reasons)],
+          status: 'not_started',
+        },
+      ],
+    };
+  }
+
+  private async rehearsalQuestionIds() {
+    const [questions, explanations] = await Promise.all([
+      this.listCollectionOrSeed('questions', sampleQuestions),
+      this.listCollectionOrSeed('questionExplanations', sampleQuestionExplanations),
+    ]);
+    const explainedQuestionIds = new Set(
+      (explanations as any[]).map((item: any) => item.questionId),
+    );
+    return (questions as any[])
+      .filter(
+        (question: any) => question.status !== 'draft' && explainedQuestionIds.has(question.id),
+      )
+      .map((question: any) => question.id);
+  }
+
+  async startRehearsalSession(scholarId: string, sessionId: string) {
+    if (sessionId !== 'session_core_review') return null;
+    const available = await this.listAvailableRehearsals(scholarId);
+    const session = available.sessions[0];
+    const existing = (await this.getById('rehearsalAttempts', session.attemptId, [])) as any;
+    if (!existing) {
+      const now = new Date().toISOString();
+      await this.db
+        .collection('rehearsalAttempts')
+        .doc(session.attemptId)
+        .set({
+          id: session.attemptId,
+          sessionId,
+          scholarId,
+          title: session.title,
+          status: 'in_progress',
+          currentQuestionIndex: 0,
+          questionIds: (await this.rehearsalQuestionIds()).slice(0, session.questionCount),
+          createdAtUtc: now,
+          updatedAtUtc: now,
+        });
+      const firstQuestionId = (await this.rehearsalQuestionIds())[0];
+      const firstQuestion = firstQuestionId
+        ? ((await this.getById('questions', firstQuestionId, sampleQuestions)) as any)
+        : null;
+      await this.db
+        .collection('capsuleAttempts')
+        .doc(session.attemptId)
+        .set(
+          {
+            id: session.attemptId,
+            scholarId,
+            capsuleId: firstQuestion?.capsuleId ?? 'rehearsal',
+            status: 'active',
+            currentQuestionAttemptId: `rehearsal-question-attempt-${session.attemptId}-1`,
+            totalQuestions: session.questionCount,
+            completedQuestions: 0,
+            startedAtUtc: now,
+            updatedAtUtc: now,
+          },
+          { merge: true },
+        );
+    }
+    return { attemptId: session.attemptId, resumeUrl: `/rehearsal/${session.attemptId}` };
+  }
+
+  private formatRehearsalQuestion(
+    attempt: any,
+    question: any,
+    questionAttempt: any,
+    questionNumber: number,
+    total: number,
+  ) {
+    const reason =
+      questionAttempt.reviewCategory ??
+      this.rehearsalReasonForQuestion(question, questionNumber - 1);
+    return {
+      ...(this.formatResumeQuestion(questionAttempt, question, questionNumber, total) as Record<
+        string,
+        unknown
+      >),
+      capsuleProgress: `Question ${questionNumber} of ${total}`,
+      selectionReasons: questionAttempt.selectionReasons ?? [reason],
+      reviewCategory: reason,
+      topic: questionAttempt.topic ?? this.rehearsalTopicForQuestion(question),
+    };
+  }
+
+  async getRehearsalAttempt(scholarId: string, attemptId: string) {
+    const attempt = (await this.getById('rehearsalAttempts', attemptId, [])) as any;
+    if (!attempt) return null;
+    if (attempt.scholarId !== scholarId) return 'forbidden' as const;
+    const questions = (await this.listCollectionOrSeed('questions', sampleQuestions)) as any[];
+    const ids = attempt.questionIds ?? questions.slice(0, 12).map((q: any) => q.id);
+    const index = Math.min(Number(attempt.currentQuestionIndex) || 0, ids.length - 1);
+    const question = questions.find((item: any) => item.id === ids[index]);
+    if (!question) return null;
+    const qaId = `rehearsal-question-attempt-${attemptId}-${index + 1}`;
+    let questionAttempt = (await this.getById('questionAttempts', qaId, [])) as any;
+    if (!questionAttempt) {
+      const reason = this.rehearsalReasonForQuestion(question, index);
+      questionAttempt = {
+        id: qaId,
+        capsuleAttemptId: attemptId,
+        rehearsalAttemptId: attemptId,
+        scholarId,
+        questionId: question.id,
+        markedForReview: reason === 'marked_for_review',
+        selectionReasons: [reason],
+        reviewCategory: reason,
+        topic: this.rehearsalTopicForQuestion(question),
+      };
+      await this.db.collection('questionAttempts').doc(qaId).set(questionAttempt, { merge: true });
+    }
+    const counts = ids.reduce((acc: any, id: string, i: number) => {
+      const q = questions.find((item: any) => item.id === id);
+      const reason = q ? this.rehearsalReasonForQuestion(q, i) : 'previously_incorrect';
+      acc[reason] = (acc[reason] ?? 0) + 1;
+      return acc;
+    }, {});
+    return {
+      attemptId,
+      title: attempt.title,
+      currentQuestion: index + 1,
+      totalQuestions: ids.length,
+      reviewCategoryCounts: counts,
+      nextQuestion: this.formatRehearsalQuestion(
+        attempt,
+        question,
+        questionAttempt,
+        index + 1,
+        ids.length,
+      ),
+    };
+  }
+
+  async submitRehearsalQuestionAttempt(
+    scholarId: string,
+    attemptId: string,
+    questionAttemptId: string,
+    body: any,
+  ) {
+    const attempt = (await this.getById('rehearsalAttempts', attemptId, [])) as any;
+    if (!attempt || attempt.scholarId !== scholarId) return null;
+    const qa = (await this.getById('questionAttempts', questionAttemptId, [])) as any;
+    if (!qa || qa.rehearsalAttemptId !== attemptId) return null;
+    return this.submitQuestionAttempt(attemptId, questionAttemptId, body, scholarId);
+  }
+
+  async acknowledgeRehearsalMemory(
+    scholarId: string,
+    attemptId: string,
+    questionAttemptId: string,
+  ) {
+    const attempt = (await this.getById('rehearsalAttempts', attemptId, [])) as any;
+    if (!attempt || attempt.scholarId !== scholarId) return null;
+    return this.acknowledgeMemory(questionAttemptId, scholarId);
+  }
+
+  async advanceRehearsalAttempt(scholarId: string, attemptId: string) {
+    const attempt = (await this.getById('rehearsalAttempts', attemptId, [])) as any;
+    if (!attempt || attempt.scholarId !== scholarId) return null;
+    const index = Number(attempt.currentQuestionIndex) || 0;
+    const qa = (await this.getById(
+      'questionAttempts',
+      `rehearsal-question-attempt-${attemptId}-${index + 1}`,
+      [],
+    )) as any;
+    if (!qa?.submittedAtUtc || !qa?.memoryAcknowledgedAtUtc) return 'conflict' as const;
+    const total = (attempt.questionIds ?? []).length;
+    const now = new Date().toISOString();
+    if (index + 1 >= total) {
+      await this.db
+        .collection('rehearsalAttempts')
+        .doc(attemptId)
+        .set({ status: 'complete', completedAtUtc: now, updatedAtUtc: now }, { merge: true });
+      return 'complete' as const;
+    }
+    await this.db
+      .collection('rehearsalAttempts')
+      .doc(attemptId)
+      .set({ currentQuestionIndex: index + 1, updatedAtUtc: now }, { merge: true });
+    return { attemptId, currentQuestion: index + 2 };
+  }
+
+  async getRehearsalSummary(scholarId: string, attemptId: string) {
+    const attempt = (await this.getById('rehearsalAttempts', attemptId, [])) as any;
+    if (!attempt) return null;
+    if (attempt.scholarId !== scholarId) return 'forbidden' as const;
+    const qas = ((await this.listCollectionOrSeed('questionAttempts', [])) as any[]).filter(
+      (qa: any) => qa.rehearsalAttemptId === attemptId,
+    );
+    return {
+      attemptId,
+      completedAtUtc: attempt.completedAtUtc ?? new Date().toISOString(),
+      questionsReviewed:
+        qas.filter((qa: any) => qa.submittedAtUtc).length || (attempt.questionIds ?? []).length,
+      improvedAnswers: qas.filter((qa: any) => qa.correct === true).length,
+      remainingWeakTopics: [
+        ...new Set(
+          qas
+            .filter((qa: any) => qa.reviewCategory === 'weak_topic' && qa.correct !== true)
+            .map((qa: any) => qa.topic),
+        ),
+      ],
+      memoryPearlsReviewed: qas.filter((qa: any) => qa.memoryAcknowledgedAtUtc).length,
+      suggestedNextAction: 'View readiness, then continue review on remaining weak topics.',
+    };
+  }
+
   async importLearningPack(payload: LearningPackImportPayload, importedBy: string) {
     const errors = validateLearningPackImport(payload);
     if (errors.length) return importFailedSummary(payload, importedBy, errors);
