@@ -31,7 +31,7 @@ import {
   validateLearningPackImport,
   type LearningPackImportPayload,
 } from './content-import.js';
-import type { CheckInInput } from './check-ins.schemas.js';
+import type { CheckInInput, MorningCheckInInput } from './check-ins.schemas.js';
 
 const clampPercentage = (value: unknown, fallback = 0) =>
   Math.min(Math.max(Math.round(Number(value) || fallback), 0), 100);
@@ -145,6 +145,101 @@ export class LearningRepository {
     };
     await ref.set(checkIn);
     return checkIn;
+  }
+
+  async saveMorningCheckIn(scholarId: string, input: MorningCheckInInput) {
+    const today = await this.getCurrentChallengeToday(scholarId);
+    if (!today || today.locked) return { status: 'not_found' as const };
+
+    const challengeId =
+      (today as any).challengeId ?? ((await this.getDashboard()) as any).activeChallengeId;
+    const dayNumber = Number((today as any).studyDay) || 1;
+    const allowedMin = 1;
+    const allowedMax = Math.max(Number((today as any).targetCapsules) || 0, allowedMin);
+    if (input.goal < allowedMin || input.goal > allowedMax) {
+      return {
+        status: 'validation_error' as const,
+        errors: {
+          goal: [`Goal must be between ${allowedMin} and ${allowedMax}.`],
+          goalMin: allowedMin,
+          goalMax: allowedMax,
+        },
+      };
+    }
+    if (input.needSupport && !input.supportCategory) {
+      return {
+        status: 'validation_error' as const,
+        errors: { supportCategory: ['Support category is required when support is needed.'] },
+      };
+    }
+
+    const now = new Date().toISOString();
+    const checkInId = `morning-${scholarId}-${challengeId ?? 'challenge'}-day-${dayNumber}`;
+    const ref = this.db.collection('checkIns').doc(checkInId);
+    const existing = await ref.get();
+    const existingData = existing.exists ? (existing.data() as any) : null;
+    const supportNeeded = input.needSupport;
+    const normalizedSupportCategory = supportNeeded ? input.supportCategory : null;
+    const normalizedSupportDescription = supportNeeded ? input.supportDescription : undefined;
+    const normalizedObstacle = input.obstacle;
+    const checkIn = removeUndefinedProperties({
+      ...existingData,
+      id: checkInId,
+      kind: 'morning',
+      type: 'morning',
+      status: 'complete',
+      scholarId,
+      userId: scholarId,
+      challengeId,
+      dayNumber,
+      confidence: input.confidence,
+      goal: input.goal,
+      needSupport: supportNeeded,
+      obstacle: normalizedObstacle,
+      supportCategory: normalizedSupportCategory,
+      supportDescription: normalizedSupportDescription,
+      createdAtUtc: existingData?.createdAtUtc ?? now,
+      updatedAtUtc: now,
+    }) as Record<string, unknown>;
+
+    let supportRequestId: string | undefined;
+    if (supportNeeded && normalizedSupportCategory) {
+      supportRequestId = `morning-check-in-support-${scholarId}-${challengeId ?? 'challenge'}-day-${dayNumber}`;
+      await this.db
+        .collection('supportRequests')
+        .doc(supportRequestId)
+        .set(
+          removeUndefinedProperties({
+            id: supportRequestId,
+            scholarId,
+            requesterId: scholarId,
+            challengeId,
+            dayNumber,
+            category: normalizedSupportCategory,
+            description: normalizedSupportDescription,
+            obstacle: normalizedObstacle,
+            source: 'morning_check_in',
+            status: 'open',
+            createdAtUtc: now,
+            updatedAtUtc: now,
+          }) as Record<string, unknown>,
+          { merge: true },
+        );
+    }
+
+    await ref.set({ ...checkIn, supportRequestId }, { merge: true });
+    return {
+      status: 'saved' as const,
+      created: !existing.exists,
+      supportRequestId,
+      data: {
+        id: checkInId,
+        kind: 'morning',
+        status: 'complete',
+        studyPlanReady: true,
+        message: 'Morning check-in complete. Your study plan is ready.',
+      },
+    };
   }
 
   async seedAll() {
