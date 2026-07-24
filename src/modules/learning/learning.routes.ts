@@ -9,7 +9,7 @@ import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { LearningRepository } from './learning.repository.js';
-import { checkInSchema } from './check-ins.schemas.js';
+import { checkInSchema, morningCheckInSchema } from './check-ins.schemas.js';
 
 type LearningRoutesOptions = {
   learning: LearningRepository;
@@ -101,6 +101,28 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     async (request, reply) => {
       const data = await learning.saveCheckIn(request.user!.uid, checkInSchema.parse(request.body));
       return reply.status(201).send({ data });
+    },
+  );
+
+  app.post(
+    '/check-ins/morning',
+    {
+      preHandler: requireScholarAccess,
+      schema: { body: zodToJsonSchema(morningCheckInSchema) },
+    },
+    async (request, reply) => {
+      const input = morningCheckInSchema.parse(request.body);
+      const result = await (learning as any).saveMorningCheckIn(request.user!.uid, input);
+      if (result?.status === 'not_found')
+        throw new NotFoundError('Current challenge day not found');
+      if (result?.status === 'validation_error') throw new ValidationAppError(result.errors);
+      if (result?.supportRequestId) {
+        request.log.info(
+          { supportRequestId: result.supportRequestId, scholarId: request.user!.uid },
+          'Created or linked morning check-in support request',
+        );
+      }
+      return reply.status(result.created ? 201 : 200).send(result.data);
     },
   );
 

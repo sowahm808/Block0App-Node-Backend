@@ -1161,6 +1161,69 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('completes authenticated scholar morning check-ins', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-morning-check-in', 'morning@example.com', [
+      'scholar:access',
+    ]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/check-ins/morning',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: {
+        kind: 'morning',
+        confidence: 7,
+        goal: 3,
+        needSupport: true,
+        obstacle: 'Afternoon lab schedule may reduce study time.',
+        supportCategory: 'Time management',
+        supportDescription: 'Help me sequence capsules around lab blocks.',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      id: 'morning-check-in-test',
+      kind: 'morning',
+      status: 'complete',
+      studyPlanReady: true,
+      message: 'Morning check-in complete. Your study plan is ready.',
+    });
+  });
+
+  it('returns field validation errors for morning check-in goals outside the active range', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+    const access = await svc.signAccessToken('u-morning-goal', 'morning-goal@example.com', [
+      'scholar:access',
+    ]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/check-ins/morning',
+      headers: { authorization: `Bearer ${access.token}` },
+      payload: { confidence: 8, goal: 20, needSupport: false },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      title: 'Validation Failed',
+      errors: { goalMin: 1, goalMax: 15 },
+    });
+  });
+
   it('/readiness/current requires scholar access', async () => {
     const app = await buildApp({
       authService: svc,

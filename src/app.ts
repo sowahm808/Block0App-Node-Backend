@@ -206,6 +206,34 @@ export async function buildApp(overrides?: any) {
             createdAtUtc: new Date().toISOString(),
             updatedAtUtc: new Date().toISOString(),
           }),
+          saveMorningCheckIn: async (_userId: string, input: any) => {
+            if (input.goal < 1 || input.goal > 15) {
+              return {
+                status: 'validation_error',
+                errors: { goal: ['Goal must be between 1 and 15.'], goalMin: 1, goalMax: 15 },
+              };
+            }
+            if (input.needSupport && !input.supportCategory) {
+              return {
+                status: 'validation_error',
+                errors: {
+                  supportCategory: ['Support category is required when support is needed.'],
+                },
+              };
+            }
+            return {
+              status: 'saved',
+              created: true,
+              supportRequestId: input.needSupport ? 'support-request-test' : undefined,
+              data: {
+                id: 'morning-check-in-test',
+                kind: 'morning',
+                status: 'complete',
+                studyPlanReady: true,
+                message: 'Morning check-in complete. Your study plan is ready.',
+              },
+            };
+          },
           resumeCapsuleAttempt: async (capsuleAttemptId: string) => {
             const seed = await import('./modules/learning/learning.seed.js');
             const attempt = seed.sampleCapsuleAttempts.find((item) => item.id === capsuleAttemptId);
