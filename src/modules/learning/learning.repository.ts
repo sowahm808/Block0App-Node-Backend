@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import {
   learningSeedCollections,
@@ -536,7 +537,7 @@ export class LearningRepository {
         .map((assignment: any) => assignment.learningPackId),
     );
 
-    let packs = allPacks.filter(
+    const packs = allPacks.filter(
       (pack: any) =>
         pack.status === 'published' &&
         (!hasAssignments || visiblePackIds.has(pack.id) || !scholarId),
@@ -708,7 +709,11 @@ export class LearningRepository {
           left.title.localeCompare(right.title)
         );
       })
-      .map(({ recommendedRank, ...pack }: any) => pack);
+      .map((item: any) => {
+        const pack = { ...item };
+        delete pack.recommendedRank;
+        return pack;
+      });
   }
 
   async getLearningPackDetail(scholarId: string | undefined, packId: string) {
@@ -735,9 +740,7 @@ export class LearningRepository {
       (left, right) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0),
     );
     const capsuleRows = packCapsules.map((capsule: any, index: number) => {
-      const attempt = (capsuleAttempts as any[]).find(
-        (item: any) => item.capsuleId === capsule.id,
-      );
+      const attempt = (capsuleAttempts as any[]).find((item: any) => item.capsuleId === capsule.id);
       const capsuleQuestions = (questions as any[]).filter(
         (question: any) => question.capsuleId === capsule.id,
       );
@@ -759,6 +762,8 @@ export class LearningRepository {
         totalQuestions: Number(capsule.questionCount ?? capsuleQuestions.length) || 0,
         status,
         progressStatus: status,
+        activeAttemptId: attempt && status === 'in_progress' ? attempt.id : undefined,
+        activeCapsuleAttemptId: attempt && status === 'in_progress' ? attempt.id : undefined,
         completedAtUtc: isoOrUndefined(attempt?.completedAtUtc ?? attempt?.completedAt),
         ...(listItem.availabilityStatus === 'available'
           ? {
@@ -789,15 +794,123 @@ export class LearningRepository {
       questionsAnswered: listItem.completedQuestions,
       continueUrl:
         listItem.availabilityStatus === 'available'
-          ? activeCapsule?.continueUrl ??
+          ? (activeCapsule?.continueUrl ??
             nextCapsule?.startUrl ??
             firstAvailableCapsule?.continueUrl ??
-            listItem.continueUrl
+            listItem.continueUrl)
           : undefined,
       activeCapsuleUrl: activeCapsule?.continueUrl,
       nextCapsuleUrl: nextCapsule?.startUrl,
       capsules: capsuleRows,
     });
+  }
+
+  async startCapsuleAttempt(
+    scholarId: string | undefined,
+    capsuleId: string,
+    idempotencyKey: string,
+  ) {
+    const capsules = await this.listCollectionOrSeed('capsules', sampleCapsules);
+    const capsule = (capsules as any[]).find(
+      (item: any) =>
+        item.id === capsuleId || item.externalId === capsuleId || item.slug === capsuleId,
+    );
+    if (!capsule) return null;
+
+    const visiblePacks = await this.listLearningPacks(scholarId);
+    const parentPack = (visiblePacks as any[]).find(
+      (pack: any) =>
+        pack.id === capsule.learningPackId || pack.externalId === capsule.learningPackId,
+    );
+    if (!parentPack || parentPack.availabilityStatus !== 'available') return 'forbidden' as const;
+
+    const learnerId = scholarId ?? 'anonymous';
+    const idempotencyId = crypto
+      .createHash('sha256')
+      .update(`${learnerId}:${capsule.id}:${idempotencyKey}`)
+      .digest('hex');
+    const idempotencyRef = this.db.collection('capsuleStartRequests').doc(idempotencyId);
+    const previous = await idempotencyRef.get();
+    if (previous.exists) {
+      const previousData = previous.data() as any;
+      return {
+        created: false,
+        response: {
+          capsuleAttemptId: previousData.capsuleAttemptId,
+          capsuleId: capsule.id,
+          status: 'active',
+          resumeUrl: `/capsules/${previousData.capsuleAttemptId}`,
+        },
+      };
+    }
+
+    const attempts = scholarId
+      ? await this.listScholarDocuments('capsuleAttempts', scholarId)
+      : await this.listCollectionOrSeed('capsuleAttempts', sampleCapsuleAttempts);
+    const activeAttempt = (attempts as any[]).find(
+      (attempt: any) =>
+        attempt.capsuleId === capsule.id &&
+        !attempt.completedAtUtc &&
+        !attempt.completedAt &&
+        attempt.status !== 'complete',
+    );
+    if (activeAttempt) return { activeAttemptId: activeAttempt.id };
+
+    const questions = (await this.listCollectionOrSeed('questions', sampleQuestions)) as any[];
+    const capsuleQuestions = questions
+      .filter((question: any) => question.capsuleId === capsule.id)
+      .sort((left: any, right: any) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0))
+      .slice(0, 4);
+    if (capsuleQuestions.length === 0) return null;
+
+    const now = new Date().toISOString();
+    const attemptId = `attempt_${idempotencyId.slice(0, 20)}`;
+    const firstQuestionAttemptId = `question-attempt_${idempotencyId.slice(0, 20)}_q1`;
+    const attempt = {
+      id: attemptId,
+      scholarId: learnerId,
+      capsuleId: capsule.id,
+      status: 'active',
+      completedQuestions: 0,
+      totalQuestions: 4,
+      currentQuestionAttemptId: firstQuestionAttemptId,
+      idempotencyKey,
+      createdAtUtc: now,
+      updatedAtUtc: now,
+    };
+    await this.db.collection('capsuleAttempts').doc(attemptId).set(attempt, { merge: false });
+    await this.db.collection('questionAttempts').doc(firstQuestionAttemptId).set(
+      {
+        id: firstQuestionAttemptId,
+        capsuleAttemptId: attemptId,
+        questionId: capsuleQuestions[0].id,
+        status: 'w1_active',
+        markedForReview: false,
+        createdAtUtc: now,
+        updatedAtUtc: now,
+      },
+      { merge: false },
+    );
+    await idempotencyRef.set(
+      {
+        id: idempotencyId,
+        scholarId: learnerId,
+        capsuleId: capsule.id,
+        idempotencyKey,
+        capsuleAttemptId: attemptId,
+        createdAtUtc: now,
+      },
+      { merge: false },
+    );
+    return {
+      created: true,
+      response: {
+        capsuleAttemptId: attemptId,
+        capsuleId: capsule.id,
+        status: 'active',
+        resumeUrl: `/capsules/${attemptId}`,
+      },
+    };
   }
 
   async resumeCapsuleAttempt(capsuleAttemptId: string) {
