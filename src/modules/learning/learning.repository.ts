@@ -25,6 +25,7 @@ import {
   sampleAiDrafts,
   sampleReviewHistory,
   sampleSupportRequests,
+  sampleClinicalScenarios,
 } from './learning.seed.js';
 import {
   importFailedSummary,
@@ -595,6 +596,272 @@ export class LearningRepository {
         (challenge) => challenge.id === slugOrId || challenge.slug === slugOrId,
       ) ?? null
     );
+  }
+
+  private scenarioSummary(scenario: any, attempts: any[]) {
+    const scenarioAttempts = attempts.filter((attempt) => attempt.scenarioId === scenario.id);
+    const completed = scenarioAttempts
+      .filter((attempt) => attempt.status === 'submitted' || attempt.status === 'completed')
+      .sort((a, b) => String(b.submittedAtUtc ?? '').localeCompare(String(a.submittedAtUtc ?? '')));
+    const active = scenarioAttempts.find((attempt) => attempt.status === 'in_progress');
+    const bestScore = completed.length
+      ? Math.max(...completed.map((attempt) => Number(attempt.score ?? 0)))
+      : null;
+    return {
+      id: scenario.id,
+      title: scenario.title,
+      clinicalCategory: scenario.clinicalCategory,
+      clinicalDomain: scenario.clinicalDomain,
+      difficulty: scenario.difficulty,
+      questionCount: Number(scenario.questionCount ?? scenario.questions?.length ?? 0),
+      mode: scenario.mode ?? 'untimed',
+      estimatedMinutes: Number(scenario.estimatedMinutes ?? 0),
+      status: active ? 'in_progress' : completed.length ? 'completed' : 'not_started',
+      score: bestScore,
+      scorePermitted: completed.length > 0,
+      activeAttemptId: active?.id ?? null,
+    };
+  }
+
+  async listClinicalScenarios(scholarId: string) {
+    const snapshot = await this.db.collection('clinicalScenarios').get();
+    const scenarios = snapshot.docs.length
+      ? snapshot.docs.map((doc) => doc.data())
+      : sampleClinicalScenarios;
+    const attempts = await this.listScholarDocuments('scenarioAttempts', scholarId);
+    const cards = scenarios.map((scenario: any) =>
+      this.scenarioSummary(scenario, attempts as any[]),
+    );
+    const completedScenarios = cards.filter((scenario) => scenario.status === 'completed').length;
+    const completedScores = cards.filter(
+      (scenario) => scenario.scorePermitted && scenario.score !== null,
+    );
+    return {
+      summary: {
+        availableScenarios: cards.length,
+        completedScenarios,
+        currentDayTarget: 2,
+        averagePerformance: completedScores.length
+          ? clampPercentage(
+              completedScores.reduce((sum, item) => sum + Number(item.score), 0) /
+                completedScores.length,
+            )
+          : 0,
+        timedScenariosPending: cards.filter(
+          (scenario) => scenario.mode === 'timed' && scenario.status !== 'completed',
+        ).length,
+      },
+      scenarios: cards,
+    };
+  }
+
+  async getClinicalScenario(scenarioId: string) {
+    const scenario = await this.getById('clinicalScenarios', scenarioId, sampleClinicalScenarios);
+    if (!scenario) return null;
+    return removeUndefinedProperties({
+      id: (scenario as any).id,
+      title: (scenario as any).title,
+      clinicalCategory: (scenario as any).clinicalCategory,
+      clinicalDomain: (scenario as any).clinicalDomain,
+      difficulty: (scenario as any).difficulty,
+      estimatedMinutes: (scenario as any).estimatedMinutes,
+      questionCount: (scenario as any).questionCount ?? (scenario as any).questions?.length ?? 0,
+      mode: (scenario as any).mode ?? 'untimed',
+      instructions: (scenario as any).instructions ?? [],
+      attemptRules: (scenario as any).attemptRules ?? { sequentialProgressionRequired: true },
+    });
+  }
+
+  private attemptPayload(scenario: any, attempt: any) {
+    const sequential = scenario.attemptRules?.sequentialProgressionRequired !== false;
+    const answered = Object.keys(attempt.answers ?? {}).length;
+    const currentQuestionIndex = Math.min(
+      Number(attempt.currentQuestionIndex ?? answered),
+      scenario.questions.length - 1,
+    );
+    const allowedQuestions = sequential
+      ? [scenario.questions[currentQuestionIndex]]
+      : scenario.questions;
+    return removeUndefinedProperties({
+      id: attempt.id,
+      attemptId: attempt.id,
+      scenarioId: scenario.id,
+      status: attempt.status,
+      saveStatus: attempt.saveStatus ?? 'saved',
+      startedAtUtc: attempt.startedAtUtc,
+      submittedAtUtc: attempt.submittedAtUtc,
+      currentQuestionIndex,
+      sequentialProgressionRequired: sequential,
+      header: {
+        title: scenario.title,
+        clinicalDomain: scenario.clinicalDomain,
+        difficulty: scenario.difficulty,
+        mode: scenario.mode ?? 'untimed',
+        estimatedMinutes: scenario.estimatedMinutes,
+        questionCount: scenario.questions.length,
+      },
+      patientSummary: scenario.patientSummary,
+      vignette: scenario.vignette,
+      labs: scenario.labs ?? [],
+      media: scenario.media ?? [],
+      questions: allowedQuestions.map((sourceQuestion: any) => {
+        const question = { ...sourceQuestion };
+        delete question.correctAnswer;
+        delete question.rationale;
+        delete question.clinicalReasoning;
+        delete question.reference;
+        return {
+          ...question,
+          scholarAnswer: attempt.answers?.[question.id] ?? null,
+        };
+      }),
+    });
+  }
+
+  async createOrResumeScenarioAttempt(scholarId: string, scenarioId: string) {
+    const scenario = await this.getById('clinicalScenarios', scenarioId, sampleClinicalScenarios);
+    if (!scenario) return null;
+    const existing = (await this.listScholarDocuments('scenarioAttempts', scholarId)).find(
+      (attempt: any) => attempt.scenarioId === scenarioId && attempt.status === 'in_progress',
+    ) as any;
+    if (existing) return this.attemptPayload(scenario, existing);
+    const now = new Date().toISOString();
+    const ref = this.db.collection('scenarioAttempts').doc();
+    const attempt = {
+      id: ref.id,
+      scenarioId,
+      scholarId,
+      status: 'in_progress',
+      answers: {},
+      currentQuestionIndex: 0,
+      saveStatus: 'saved',
+      startedAtUtc: now,
+      updatedAtUtc: now,
+    };
+    await ref.set(attempt);
+    return this.attemptPayload(scenario, attempt);
+  }
+
+  async getScenarioAttempt(scholarId: string, attemptId: string) {
+    const doc = await this.db.collection('scenarioAttempts').doc(attemptId).get();
+    const attempt = doc.exists ? doc.data() : null;
+    if (!attempt || (attempt as any).scholarId !== scholarId) return attempt ? 'forbidden' : null;
+    const scenario = await this.getById(
+      'clinicalScenarios',
+      (attempt as any).scenarioId,
+      sampleClinicalScenarios,
+    );
+    return scenario ? this.attemptPayload(scenario, attempt) : null;
+  }
+
+  async answerScenarioAttempt(scholarId: string, attemptId: string, body: any) {
+    const doc = await this.db.collection('scenarioAttempts').doc(attemptId).get();
+    const attempt = doc.exists ? (doc.data() as any) : null;
+    if (!attempt || attempt.scholarId !== scholarId) return attempt ? 'forbidden' : null;
+    const scenario = (await this.getById(
+      'clinicalScenarios',
+      attempt.scenarioId,
+      sampleClinicalScenarios,
+    )) as any;
+    if (!scenario) return null;
+    const questionId = String(
+      body.questionId ?? scenario.questions[attempt.currentQuestionIndex ?? 0]?.id ?? '',
+    );
+    const answer = body.answer ?? body.choiceId ?? body.selectedChoiceId;
+    const nextIndex = Math.min(
+      scenario.questions.findIndex((q: any) => q.id === questionId) + 1 || 1,
+      scenario.questions.length - 1,
+    );
+    const updated = {
+      ...attempt,
+      answers: { ...(attempt.answers ?? {}), [questionId]: answer },
+      currentQuestionIndex: nextIndex,
+      saveStatus: 'saved',
+      updatedAtUtc: new Date().toISOString(),
+    };
+    await this.db.collection('scenarioAttempts').doc(attemptId).set(updated, { merge: true });
+    return this.attemptPayload(scenario, updated);
+  }
+
+  async submitScenarioAttempt(scholarId: string, attemptId: string) {
+    const doc = await this.db.collection('scenarioAttempts').doc(attemptId).get();
+    const attempt = doc.exists ? (doc.data() as any) : null;
+    if (!attempt || attempt.scholarId !== scholarId) return attempt ? 'forbidden' : null;
+    const scenario = (await this.getById(
+      'clinicalScenarios',
+      attempt.scenarioId,
+      sampleClinicalScenarios,
+    )) as any;
+    if (!scenario) return null;
+    const correct = scenario.questions.filter(
+      (q: any) => attempt.answers?.[q.id] === q.correctAnswer,
+    ).length;
+    const score = clampPercentage((correct / scenario.questions.length) * 100);
+    const submittedAtUtc = new Date().toISOString();
+    const updated = {
+      ...attempt,
+      status: 'submitted',
+      score,
+      questionsCorrect: correct,
+      submittedAtUtc,
+      updatedAtUtc: submittedAtUtc,
+    };
+    await this.db.collection('scenarioAttempts').doc(attemptId).set(updated, { merge: true });
+    return {
+      attemptId,
+      status: 'submitted',
+      score,
+      reviewUrl: `/scenario-attempts/${attemptId}/review`,
+    };
+  }
+
+  async getScenarioAttemptReview(scholarId: string, attemptId: string) {
+    const doc = await this.db.collection('scenarioAttempts').doc(attemptId).get();
+    const attempt = doc.exists ? (doc.data() as any) : null;
+    if (!attempt || attempt.scholarId !== scholarId) return attempt ? 'forbidden' : null;
+    const scenario = (await this.getById(
+      'clinicalScenarios',
+      attempt.scenarioId,
+      sampleClinicalScenarios,
+    )) as any;
+    if (!scenario) return null;
+    const questions = scenario.questions.map((q: any) => ({
+      questionId: q.id,
+      prompt: q.prompt,
+      scholarAnswer: attempt.answers?.[q.id] ?? null,
+      correctAnswer: q.correctAnswer,
+      correct: attempt.answers?.[q.id] === q.correctAnswer,
+      rationale: q.rationale,
+      clinicalReasoning: q.clinicalReasoning,
+      reference: q.reference,
+      clinicalDomain: q.domain ?? scenario.clinicalDomain,
+    }));
+    const correct = questions.filter((q: any) => q.correct).length;
+    return {
+      attemptId,
+      scenarioId: scenario.id,
+      overallScore: attempt.score ?? clampPercentage((correct / questions.length) * 100),
+      questionsCorrect: correct,
+      questionCount: questions.length,
+      timeTakenSeconds: Math.max(
+        0,
+        Math.round(
+          (new Date(attempt.submittedAtUtc ?? Date.now()).getTime() -
+            new Date(attempt.startedAtUtc ?? Date.now()).getTime()) /
+            1000,
+        ),
+      ),
+      clinicalDomainPerformance: [
+        {
+          clinicalDomain: scenario.clinicalDomain,
+          score: attempt.score ?? clampPercentage((correct / questions.length) * 100),
+          questionsCorrect: correct,
+          questionCount: questions.length,
+        },
+      ],
+      questions,
+      rehearsalAvailable: true,
+    };
   }
 
   async getCurrentChallengeToday(scholarId?: string) {

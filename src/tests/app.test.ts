@@ -383,13 +383,41 @@ describe('MindUnlocking API', () => {
       status: 'published',
     });
 
-    const scenarios = await app.inject('/api/v1/scenarios');
-    expect(scenarios.statusCode).toBe(200);
-    expect(scenarios.json().data).toEqual(challenges.json().data);
+    users.data.set('seed-scholar', {
+      uid: 'seed-scholar',
+      email: 'learner@example.com',
+      roles: ['Scholar'],
+      permissions: ['scholar:access'],
+      status: 'Active',
+    });
+    const scholarAuthorization = `Bearer ${token({ uid: 'seed-scholar', email: 'learner@example.com', email_verified: true, permissions: ['scholar:access'] })}`;
 
-    const availableScenarios = await app.inject('/api/v1/scenarios/available');
+    const scenarios = await app.inject({
+      url: '/api/v1/scenarios',
+      headers: { authorization: scholarAuthorization },
+    });
+    expect(scenarios.statusCode).toBe(200);
+    expect(scenarios.json()).toMatchObject({
+      summary: { availableScenarios: 1, completedScenarios: 0, currentDayTarget: 2 },
+      scenarios: [
+        {
+          id: 'sepsis-triage',
+          mode: 'timed',
+          status: 'not_started',
+          activeAttemptId: null,
+        },
+      ],
+    });
+
+    const availableScenarios = await app.inject({
+      url: '/api/v1/scenarios/available',
+      headers: { authorization: scholarAuthorization },
+    });
     expect(availableScenarios.statusCode).toBe(200);
-    expect(availableScenarios.json().data).toEqual(challenges.json().data);
+    expect(availableScenarios.json()).toMatchObject({
+      summary: { availableScenarios: 1 },
+      scenarios: [{ id: 'sepsis-triage' }],
+    });
 
     const rehearsals = await app.inject('/api/v1/rehearsals');
     expect(rehearsals.statusCode).toBe(200);
@@ -403,17 +431,10 @@ describe('MindUnlocking API', () => {
     expect(legacyAvailableRehearsals.statusCode).toBe(200);
     expect(legacyAvailableRehearsals.json().data).toEqual(challenges.json().data);
 
-    users.data.set('seed-scholar', {
-      uid: 'seed-scholar',
-      email: 'learner@example.com',
-      roles: ['Scholar'],
-      permissions: ['scholar:access'],
-      status: 'Active',
-    });
     const currentToday = await app.inject({
       url: '/api/v1/challenges/current/today',
       headers: {
-        authorization: `Bearer ${token({ uid: 'seed-scholar', email: 'learner@example.com', email_verified: true, permissions: ['scholar:access'] })}`,
+        authorization: scholarAuthorization,
       },
     });
     expect(currentToday.statusCode).toBe(200);

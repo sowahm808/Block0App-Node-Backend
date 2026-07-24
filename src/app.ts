@@ -183,6 +183,132 @@ export async function buildApp(overrides?: any) {
                 ) ?? null,
             }));
           },
+          scenarioAttempts: new Map<string, any>(),
+          listClinicalScenarios: async function (scholarId: string) {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const attempts = [...(this.scenarioAttempts as Map<string, any>).values()].filter(
+              (attempt: any) => attempt.scholarId === scholarId,
+            );
+            const scenarios = seed.sampleClinicalScenarios.map((scenario: any) => {
+              const active = attempts.find(
+                (attempt: any) =>
+                  attempt.scenarioId === scenario.id && attempt.status === 'in_progress',
+              );
+              const completed = attempts.filter(
+                (attempt: any) =>
+                  attempt.scenarioId === scenario.id &&
+                  (attempt.status === 'submitted' || attempt.status === 'completed'),
+              );
+              const score = completed.length
+                ? Math.max(...completed.map((attempt: any) => Number(attempt.score ?? 0)))
+                : null;
+              return {
+                id: scenario.id,
+                title: scenario.title,
+                clinicalCategory: scenario.clinicalCategory,
+                clinicalDomain: scenario.clinicalDomain,
+                difficulty: scenario.difficulty,
+                questionCount: scenario.questionCount,
+                mode: scenario.mode,
+                estimatedMinutes: scenario.estimatedMinutes,
+                status: active ? 'in_progress' : completed.length ? 'completed' : 'not_started',
+                score,
+                scorePermitted: completed.length > 0,
+                activeAttemptId: active?.id ?? null,
+              };
+            });
+            return {
+              summary: {
+                availableScenarios: scenarios.length,
+                completedScenarios: scenarios.filter((scenario) => scenario.status === 'completed')
+                  .length,
+                currentDayTarget: 2,
+                averagePerformance: 0,
+                timedScenariosPending: scenarios.filter(
+                  (scenario) => scenario.mode === 'timed' && scenario.status !== 'completed',
+                ).length,
+              },
+              scenarios,
+            };
+          },
+          getClinicalScenario: async (scenarioId: string) => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const scenario = seed.sampleClinicalScenarios.find((item) => item.id === scenarioId);
+            if (!scenario) return null;
+            const { patientSummary, vignette, labs, media, questions, ...details } = scenario;
+            void patientSummary;
+            void vignette;
+            void labs;
+            void media;
+            void questions;
+            return details;
+          },
+          createOrResumeScenarioAttempt: async function (scholarId: string, scenarioId: string) {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const scenario = seed.sampleClinicalScenarios.find((item) => item.id === scenarioId);
+            if (!scenario) return null;
+            const id = `attempt-${scenarioId}-test`;
+            const attempt = {
+              id,
+              scenarioId,
+              scholarId,
+              status: 'in_progress',
+              answers: {},
+              currentQuestionIndex: 0,
+              saveStatus: 'saved',
+              startedAtUtc: new Date().toISOString(),
+            };
+            (this.scenarioAttempts as Map<string, any>).set(id, attempt);
+            return {
+              ...attempt,
+              header: { title: scenario.title },
+              patientSummary: scenario.patientSummary,
+              vignette: scenario.vignette,
+              labs: scenario.labs,
+              media: scenario.media,
+              questions: [scenario.questions[0]],
+              sequentialProgressionRequired: true,
+            };
+          },
+          getScenarioAttempt: async function (scholarId: string, attemptId: string) {
+            const attempt = (this.scenarioAttempts as Map<string, any>).get(attemptId);
+            if (!attempt) return null;
+            return attempt.scholarId === scholarId ? attempt : 'forbidden';
+          },
+          answerScenarioAttempt: async function (scholarId: string, attemptId: string, body: any) {
+            const attempt = (this.scenarioAttempts as Map<string, any>).get(attemptId);
+            if (!attempt) return null;
+            if (attempt.scholarId !== scholarId) return 'forbidden';
+            attempt.answers[body.questionId] = body.answer ?? body.choiceId;
+            attempt.saveStatus = 'saved';
+            return attempt;
+          },
+          submitScenarioAttempt: async function (scholarId: string, attemptId: string) {
+            const attempt = (this.scenarioAttempts as Map<string, any>).get(attemptId);
+            if (!attempt) return null;
+            if (attempt.scholarId !== scholarId) return 'forbidden';
+            attempt.status = 'submitted';
+            attempt.score = 0;
+            return {
+              attemptId,
+              status: 'submitted',
+              score: 0,
+              reviewUrl: `/scenario-attempts/${attemptId}/review`,
+            };
+          },
+          getScenarioAttemptReview: async function (scholarId: string, attemptId: string) {
+            const attempt = (this.scenarioAttempts as Map<string, any>).get(attemptId);
+            if (!attempt) return null;
+            if (attempt.scholarId !== scholarId) return 'forbidden';
+            return {
+              attemptId,
+              overallScore: attempt.score ?? 0,
+              questionsCorrect: 0,
+              clinicalDomainPerformance: [],
+              questions: [],
+              rehearsalAvailable: true,
+            };
+          },
           listReviewScenarios: async () =>
             (await import('./modules/learning/learning.seed.js')).sampleReviewScenarios,
           listAiDrafts: async () =>

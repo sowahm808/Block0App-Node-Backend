@@ -542,6 +542,119 @@ export const sampleSystemSettings = {
   updatedAtUtc: null,
 };
 
+export const sampleClinicalScenarios = [
+  {
+    id: 'sepsis-triage',
+    title: 'Febrile hypotension in the ED',
+    clinicalCategory: 'Emergency Medicine',
+    clinicalDomain: 'Infectious Disease',
+    difficulty: 'Moderate',
+    questionCount: 3,
+    mode: 'timed',
+    estimatedMinutes: 18,
+    instructions: [
+      'Review the available history, examination findings, labs, and media before answering.',
+      'Answer each question in order; timed scenarios begin when Start Scenario is selected.',
+      'Submit only after confirming you are ready for final scoring.',
+    ],
+    attemptRules: {
+      sequentialProgressionRequired: true,
+      allowAnswerRevisionBeforeSubmit: false,
+      maxAttempts: null,
+      timerStartsOnStart: true,
+    },
+    patientSummary: {
+      age: 67,
+      sex: 'Female',
+      chiefConcern: 'Fever, confusion, and low blood pressure',
+      location: 'Emergency Department',
+      acuity: 'High',
+    },
+    vignette:
+      'A 67-year-old woman with diabetes and chronic kidney disease presents with fever, confusion, dysuria, and flank pain. Triage vitals: T 39.2 C, HR 124, BP 82/48, RR 28, SpO2 94% on room air.',
+    labs: [
+      { test: 'WBC', result: '18.4 x10^9/L', referenceRange: '4.0-11.0 x10^9/L', abnormal: true },
+      { test: 'Lactate', result: '4.1 mmol/L', referenceRange: '0.5-2.2 mmol/L', abnormal: true },
+      { test: 'Creatinine', result: '2.0 mg/dL', referenceRange: '0.6-1.2 mg/dL', abnormal: true },
+      {
+        test: 'Urinalysis',
+        result: 'Nitrite positive, many WBCs',
+        referenceRange: 'Negative nitrite, 0-5 WBC/hpf',
+        abnormal: true,
+      },
+    ],
+    media: [
+      {
+        id: 'sepsis-map-chart',
+        type: 'chart',
+        title: 'Mean arterial pressure trend',
+        description: 'A chart showing persistently low MAP despite initial triage positioning.',
+        url: null,
+      },
+    ],
+    questions: [
+      {
+        id: 'sepsis-q1',
+        prompt: 'What is the most appropriate immediate management priority?',
+        type: 'single_choice',
+        choices: [
+          {
+            id: 'a',
+            text: 'Administer broad-spectrum antibiotics and begin crystalloid resuscitation',
+          },
+          { id: 'b', text: 'Wait for urine culture results before treatment' },
+          { id: 'c', text: 'Discharge with oral antibiotics' },
+          { id: 'd', text: 'Order outpatient renal ultrasound' },
+        ],
+        correctAnswer: 'a',
+        rationale:
+          'Septic shock requires immediate empiric antibiotics and fluid resuscitation after cultures when feasible without delay.',
+        clinicalReasoning:
+          'Hypotension, elevated lactate, fever, tachycardia, and urinary findings indicate likely urosepsis with hypoperfusion.',
+        reference:
+          'Surviving Sepsis Campaign: early recognition, cultures, antimicrobials, lactate-guided resuscitation.',
+        domain: 'Infectious Disease',
+      },
+      {
+        id: 'sepsis-q2',
+        prompt: 'Which finding most strongly indicates tissue hypoperfusion?',
+        type: 'single_choice',
+        choices: [
+          { id: 'a', text: 'Positive nitrites' },
+          { id: 'b', text: 'Lactate 4.1 mmol/L' },
+          { id: 'c', text: 'Fever 39.2 C' },
+          { id: 'd', text: 'Many urinary WBCs' },
+        ],
+        correctAnswer: 'b',
+        rationale:
+          'A markedly elevated lactate is a marker of tissue hypoperfusion and increased sepsis risk.',
+        clinicalReasoning:
+          'Among the listed data, lactate best captures systemic hypoperfusion rather than infection source alone.',
+        reference: 'Sepsis-3 and Surviving Sepsis Campaign lactate recommendations.',
+        domain: 'Emergency Medicine',
+      },
+      {
+        id: 'sepsis-q3',
+        prompt: 'After 30 mL/kg crystalloid, BP remains 78/44. What is the next best step?',
+        type: 'single_choice',
+        choices: [
+          { id: 'a', text: 'Start norepinephrine and reassess perfusion' },
+          { id: 'b', text: 'Give only antipyretics and observe' },
+          { id: 'c', text: 'Delay vasopressors until all labs return' },
+          { id: 'd', text: 'Start a beta blocker for tachycardia' },
+        ],
+        correctAnswer: 'a',
+        rationale:
+          'Persistent septic shock after fluids warrants vasopressors, with norepinephrine first line.',
+        clinicalReasoning:
+          'Fluid-refractory hypotension threatens organ perfusion and needs pressor support while source control continues.',
+        reference: 'Surviving Sepsis Campaign vasopressor recommendations.',
+        domain: 'Critical Care',
+      },
+    ],
+  },
+];
+
 export const sampleReviewScenarios = sampleChallenges.map((challenge) => ({
   ...challenge,
   scenarioId: challenge.id,
@@ -607,6 +720,7 @@ export const learningSeedCollections = {
   certificates: sampleCertificates,
   raffleEntries: sampleRaffleEntries,
   systemSettings: [sampleSystemSettings],
+  clinicalScenarios: sampleClinicalScenarios,
   reviewScenarios: sampleReviewScenarios,
   aiDrafts: sampleAiDrafts,
   reviewHistory: sampleReviewHistory,
