@@ -906,8 +906,22 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   app.post(
     '/admin/content/import-learning-pack',
     { preHandler: requireAdminOrReviewer },
-    async (request) => ({
-      data: await learning.importLearningPack(request.body as any, request.user?.uid ?? 'unknown'),
-    }),
+    async (request) => {
+      const body = request.body as any;
+      const compatibilityPayload = {
+        ...body,
+        learningPack: {
+          topic: 'Uncategorized',
+          objectives: [body?.learningPack?.title ?? 'Imported learning objective'],
+          ...body?.learningPack,
+        },
+      };
+      return {
+        data: await learning.importLearningPack(
+          compatibilityPayload,
+          request.user?.uid ?? 'unknown',
+        ),
+      };
+    },
   );
 }

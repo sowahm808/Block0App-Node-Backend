@@ -2532,11 +2532,26 @@ export class LearningRepository {
     };
   }
 
-  async importLearningPack(payload: LearningPackImportPayload, importedBy: string) {
+  async importLearningPack(
+    payload: LearningPackImportPayload,
+    importedBy: string,
+    importId?: string,
+  ) {
+    // The pre-existing JSON import endpoint did not require these fields. Keep it
+    // backward compatible while the document workflow validates its editable draft strictly.
+    payload = {
+      ...payload,
+      learningPack: {
+        topic: 'Uncategorized',
+        objectives: [payload.learningPack?.title ?? 'Imported learning objective'],
+        ...payload.learningPack,
+      },
+    };
     const errors = validateLearningPackImport(payload);
     if (errors.length) return importFailedSummary(payload, importedBy, errors);
     let created = 0,
-      updated = 0;
+      updated = 0,
+      skipped = 0;
     const contentIds: string[] = [];
     const audit = {
       importedBy,
@@ -2545,19 +2560,68 @@ export class LearningRepository {
     };
     const upsert = async (collectionName: string, id: string, data: any) => {
       const ref = this.db.collection(collectionName).doc(id);
-      const exists = (await ref.get()).exists;
-      if (exists) {
-        updated++;
-      } else {
-        created++;
+      const snapshot = await ref.get();
+      const existing = snapshot.exists ? snapshot.data() : undefined;
+      const now = audit.importedAtUtc;
+      const incoming = removeUndefinedProperties(data) as any;
+      const comparisonKeys = Object.keys(incoming).filter(
+        (key) =>
+          ![
+            'createdAt',
+            'createdBy',
+            'updatedAt',
+            'updatedBy',
+            'version',
+            'importAudit',
+            'importId',
+          ].includes(key),
+      );
+      const unchanged =
+        existing &&
+        comparisonKeys.every(
+          (key) => JSON.stringify(existing[key]) === JSON.stringify(incoming[key]),
+        );
+      if (unchanged) {
+        skipped++;
+        contentIds.push(id);
+        return;
       }
-      await ref.set(removeUndefinedProperties(data) as any, { merge: true });
+      if (existing) updated++;
+      else created++;
+      await ref.set(
+        {
+          ...incoming,
+          importId,
+          createdAt: existing?.createdAt ?? now,
+          createdBy: existing?.createdBy ?? importedBy,
+          updatedAt: now,
+          updatedBy: importedBy,
+          version: existing ? (Number(existing.version) || 1) + 1 : 1,
+        },
+        { merge: true },
+      );
       contentIds.push(id);
     };
     const packId = payload.learningPack.externalId;
     await upsert('learningPacks', packId, {
       id: packId,
       ...payload.learningPack,
+      description: payload.learningPack.description ?? payload.learningPack.summary ?? '',
+      objectivesSummary:
+        payload.learningPack.objectivesSummary ??
+        (payload.learningPack.objectives ?? []).join('; '),
+      estimatedStudyMinutes:
+        payload.learningPack.estimatedStudyMinutes ?? payload.learningPack.estimatedMinutes ?? 0,
+      capsuleCount: payload.capsules.length,
+      totalCapsules: payload.capsules.length,
+      questionCount: payload.capsules.reduce(
+        (total, capsule) => total + capsule.questions.length,
+        0,
+      ),
+      totalQuestions: payload.capsules.reduce(
+        (total, capsule) => total + capsule.questions.length,
+        0,
+      ),
       importAudit: audit,
     });
     for (const capsule of payload.capsules) {
@@ -2576,7 +2640,9 @@ export class LearningRepository {
         await upsert('questions', questionId, {
           ...w1Question,
           id: questionId,
+          learningPackId: packId,
           capsuleId,
+          explanation,
           importAudit: audit,
         });
         await upsert('questionExplanations', `${questionId}-explanation`, {
@@ -2597,7 +2663,7 @@ export class LearningRepository {
         });
       }
     }
-    return { created, updated, skipped: 0, failed: 0, errors: [], contentIds, audit };
+    return { created, updated, skipped, failed: 0, errors: [], contentIds, audit };
   }
 
   async listReviewQuestions() {

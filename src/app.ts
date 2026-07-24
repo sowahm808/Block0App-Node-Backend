@@ -25,6 +25,11 @@ import { profileRoutes } from './modules/profile/profile.routes.js';
 import { SettingsRepository } from './modules/settings/settings.repository.js';
 import { SettingsService } from './modules/settings/settings.service.js';
 import { settingsRoutes } from './modules/settings/settings.routes.js';
+import {
+  LearningPackImportRepository,
+  LearningPackImportService,
+} from './modules/learning/import-workflow.js';
+import { learningPackImportRoutes } from './modules/learning/import.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -710,6 +715,16 @@ export async function buildApp(overrides?: any) {
             throw new Error('Profile repository is not configured.');
           },
         });
+  const imports =
+    overrides?.imports ??
+    (!overrides
+      ? new LearningPackImportService(
+          new LearningPackImportRepository(getFirebase().db),
+          learning,
+          getFirebase().storage,
+          getFirebase().storageBucket,
+        )
+      : undefined);
   const meta = {
     name: 'MindUnlocking API',
     version: 'v1',
@@ -758,6 +773,7 @@ export async function buildApp(overrides?: any) {
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await v1.register(learningRoutes, { learning, authService, users } as any);
       await v1.register(adminRoutes, { learning, authService } as any);
+      if (imports) await v1.register(learningPackImportRoutes, { imports, authService } as any);
       await v1.register(notificationsRoutes, {
         prefix: '/notifications',
         notifications,
