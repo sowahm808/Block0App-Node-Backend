@@ -631,6 +631,145 @@ describe('MindUnlocking API', () => {
     });
   });
 
+  it('returns completion metadata and omits nextQuestion for completed capsule resumes', async () => {
+    const collections: Record<string, any[]> = {
+      dashboard: [{ id: 'default', dailyTarget: 2, cohortTimeZone: 'UTC' }],
+      enrollments: [
+        {
+          scholarId: 'scholar-a',
+          status: 'active',
+          dailyTarget: 2,
+          cohortTimeZone: 'UTC',
+        },
+      ],
+      learningPacks: [{ id: 'pack_day_1', title: 'Day 1 Foundations', capsuleCount: 3 }],
+      capsules: [
+        { id: 'capsule_1', learningPackId: 'pack_day_1', title: 'Chest Pain Triage', sequence: 1 },
+        { id: 'capsule_2', learningPackId: 'pack_day_1', title: 'Syncope', sequence: 2 },
+        { id: 'capsule_3', learningPackId: 'pack_day_1', title: 'Dyspnea', sequence: 3 },
+      ],
+      questions: [
+        { id: 'q1', capsuleId: 'capsule_2', sequence: 1 },
+        { id: 'q2', capsuleId: 'capsule_2', sequence: 2 },
+      ],
+      capsuleAttempts: [
+        {
+          id: 'attempt_123',
+          scholarId: 'scholar-a',
+          capsuleId: 'capsule_1',
+          status: 'complete',
+          completedAtUtc: '2026-07-24T12:00:00.000Z',
+        },
+        {
+          id: 'attempt_456',
+          scholarId: 'scholar-a',
+          capsuleId: 'capsule_2',
+          status: 'complete',
+          totalQuestions: 2,
+          completedQuestions: 2,
+          startedAtUtc: '2026-07-24T15:32:19.000Z',
+          completedAtUtc: '2026-07-24T15:42:31.000Z',
+          currentQuestionAttemptId: 'qa2',
+        },
+      ],
+      questionAttempts: [
+        { id: 'qa1', capsuleAttemptId: 'attempt_456', questionId: 'q1', correct: true },
+        {
+          id: 'qa2',
+          capsuleAttemptId: 'attempt_456',
+          questionId: 'q2',
+          correct: false,
+          markedForReview: true,
+        },
+      ],
+      raffleEntries: [],
+    };
+    const db = {
+      collection(name: string) {
+        const rows = collections[name] ?? [];
+        return {
+          doc(id: string) {
+            return {
+              async get() {
+                const row = rows.find((item) => item.id === id);
+                return { exists: !!row, data: () => row };
+              },
+              async set(value: any) {
+                rows.push(value);
+              },
+            };
+          },
+          limit() {
+            return {
+              async get() {
+                return { empty: rows.length === 0, docs: rows.map((row) => ({ data: () => row })) };
+              },
+            };
+          },
+          where(field: string, _operator: string, value: string) {
+            const filtered = rows.filter((row) => row[field] === value);
+            return {
+              limit() {
+                return this;
+              },
+              async get() {
+                return {
+                  empty: filtered.length === 0,
+                  docs: filtered.map((row) => ({ data: () => row })),
+                };
+              },
+            };
+          },
+          async get() {
+            return { empty: rows.length === 0, docs: rows.map((row) => ({ data: () => row })) };
+          },
+        };
+      },
+    };
+
+    const resume = await new LearningRepository(db as any).resumeCapsuleAttempt(
+      'attempt_456',
+      'scholar-a',
+    );
+
+    expect(resume).toMatchObject({
+      capsuleAttemptId: 'attempt_456',
+      title: 'Syncope',
+      learningPackTitle: 'Day 1 Foundations',
+      learningPackId: 'pack_day_1',
+      questionCount: 2,
+      completedQuestions: 2,
+      correctAnswers: 1,
+      completionTimeSeconds: 612,
+      completedAtUtc: '2026-07-24T15:42:31.000Z',
+      markedForReviewCount: 1,
+      packProgress: { completedCapsules: 2, totalCapsules: 3, progressPercentage: 67 },
+      dailyGoalProgress: { completedCapsules: 2, targetCapsules: 2, progressPercentage: 100 },
+      reward: {
+        earnedRaffleEntry: true,
+        raffleEntriesAwarded: 1,
+        message: 'You earned a raffle entry for completing today’s capsule target.',
+      },
+      nextCapsuleUrl: '/capsules/start/capsule_3',
+      learningPackUrl: '/learning-packs/pack_day_1',
+      todayProgressUrl: '/dashboard',
+      endSessionUrl: '/dashboard',
+      complete: true,
+    });
+    expect((resume as any).nextQuestion).toBeUndefined();
+    expect(collections.raffleEntries).toHaveLength(1);
+
+    const resumedAgain = await new LearningRepository(db as any).resumeCapsuleAttempt(
+      'attempt_456',
+      'scholar-a',
+    );
+    expect((resumedAgain as any).reward).toMatchObject({
+      earnedRaffleEntry: true,
+      raffleEntriesAwarded: 1,
+    });
+    expect(collections.raffleEntries).toHaveLength(1);
+  });
+
   it('requires admin or content-review access for learning-pack imports and audits results', async () => {
     const app = await buildApp({
       authService: svc,

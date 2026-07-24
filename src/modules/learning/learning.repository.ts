@@ -937,10 +937,28 @@ export class LearningRepository {
       .slice(0, 4);
     const questionCount = Number(attempt.totalQuestions ?? capsule.questionCount) || 4;
     const completedQuestions = Math.min(Number(attempt.completedQuestions) || 0, questionCount);
-    const complete =
-      !!attempt.completedAtUtc ||
-      attempt.status === 'complete' ||
-      completedQuestions >= questionCount;
+    const allQuestionAttempts = (await this.listCollectionOrSeed(
+      'questionAttempts',
+      sampleQuestionAttempts,
+    )) as any[];
+    const acknowledgedSubmittedQuestions = allQuestionAttempts.filter(
+      (questionAttempt: any) =>
+        questionAttempt.capsuleAttemptId === attempt.id &&
+        questionAttempt.submittedAtUtc &&
+        questionAttempt.memoryAcknowledgedAtUtc,
+    ).length;
+    const inferredComplete =
+      completedQuestions >= questionCount && acknowledgedSubmittedQuestions >= questionCount;
+    const complete = !!attempt.completedAtUtc || attempt.status === 'complete' || inferredComplete;
+    if (inferredComplete && !attempt.completedAtUtc && attempt.status !== 'complete') {
+      const completedAtUtc = new Date().toISOString();
+      attempt.completedAtUtc = completedAtUtc;
+      attempt.status = 'complete';
+      await this.db
+        .collection('capsuleAttempts')
+        .doc(capsuleAttemptId)
+        .set({ status: 'complete', completedAtUtc, updatedAtUtc: completedAtUtc }, { merge: true });
+    }
     const startedAt = toDate(attempt.startedAtUtc ?? attempt.createdAtUtc)?.getTime() ?? Date.now();
     const durationSeconds =
       Number(attempt.durationSeconds ?? capsule.durationSeconds ?? 600) || 600;
@@ -952,13 +970,16 @@ export class LearningRepository {
       capsuleAttemptId: attempt.id,
       title: capsule.title,
       learningPackTitle: learningPack?.title ?? capsule.learningPackTitle ?? '',
+      learningPackId: learningPack?.id ?? capsule.learningPackId,
       capsuleNumber: Number(capsule.capsuleNumber ?? capsule.sequence) || 1,
       questionCount,
-      completedQuestions,
+      completedQuestions: complete ? questionCount : completedQuestions,
       remainingSeconds,
       complete,
     } as any;
-    if (complete) return base;
+    if (complete) {
+      return this.formatCompletedCapsuleResume(base, attempt, capsule, learningPack, questionCount);
+    }
 
     const questionAttempt = (await this.getById(
       'questionAttempts',
@@ -998,6 +1019,156 @@ export class LearningRepository {
           };
     }
     return base;
+  }
+
+  private async formatCompletedCapsuleResume(
+    base: any,
+    attempt: any,
+    capsule: any,
+    learningPack: any,
+    questionCount: number,
+  ) {
+    const [questionAttempts, capsules, capsuleAttempts, enrollment, existingReward] =
+      await Promise.all([
+        this.listCollectionOrSeed('questionAttempts', sampleQuestionAttempts),
+        this.listCollectionOrSeed('capsules', sampleCapsules),
+        this.listCollectionOrSeed('capsuleAttempts', sampleCapsuleAttempts),
+        attempt.scholarId ? this.getActiveEnrollment(attempt.scholarId) : Promise.resolve(null),
+        this.getById(
+          'raffleEntries',
+          `raffle-entry-capsule-target-${attempt.id}`,
+          sampleRaffleEntries,
+        ),
+      ]);
+    const scopedQuestionAttempts = questionAttempts.filter(
+      (questionAttempt: any) => questionAttempt.capsuleAttemptId === attempt.id,
+    );
+    const correctAnswers = scopedQuestionAttempts.filter(
+      (questionAttempt: any) => questionAttempt.correct === true,
+    ).length;
+    const markedForReviewCount = scopedQuestionAttempts.filter(
+      (questionAttempt: any) => questionAttempt.markedForReview === true,
+    ).length;
+    const completedAtUtc =
+      isoOrUndefined(attempt.completedAtUtc ?? attempt.completedAt) ?? new Date().toISOString();
+    const startedAtUtc = toDate(attempt.startedAtUtc ?? attempt.createdAtUtc)?.getTime();
+    const completedAtMs = toDate(completedAtUtc)?.getTime();
+    const completionTimeSeconds = Number.isFinite(Number(attempt.completionTimeSeconds))
+      ? Number(attempt.completionTimeSeconds)
+      : Number.isFinite(Number(attempt.durationSeconds))
+        ? Number(attempt.durationSeconds)
+        : startedAtUtc && completedAtMs
+          ? Math.max(Math.floor((completedAtMs - startedAtUtc) / 1000), 0)
+          : undefined;
+
+    const packCapsules = capsules
+      .filter((item: any) => item.learningPackId === capsule.learningPackId)
+      .sort(
+        (left: any, right: any) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0),
+      );
+    const completedPackCapsules = packCapsules.filter((item: any) =>
+      capsuleAttempts.some(
+        (candidate: any) =>
+          candidate.scholarId === attempt.scholarId &&
+          candidate.capsuleId === item.id &&
+          (candidate.completedAtUtc || candidate.status === 'complete'),
+      ),
+    ).length;
+    const totalPackCapsules = Number(learningPack?.capsuleCount ?? packCapsules.length) || 0;
+    const nextCapsule = packCapsules.find(
+      (item: any) =>
+        item.id !== capsule.id &&
+        !capsuleAttempts.some(
+          (candidate: any) =>
+            candidate.scholarId === attempt.scholarId &&
+            candidate.capsuleId === item.id &&
+            (candidate.completedAtUtc || candidate.status === 'complete'),
+        ),
+    );
+
+    const dailyGoalProgress = await this.getDailyCapsuleProgress(
+      attempt.scholarId,
+      enrollment,
+      capsuleAttempts,
+    );
+    const earnedRaffleEntry =
+      !!existingReward ||
+      (dailyGoalProgress.targetCapsules > 0 &&
+        dailyGoalProgress.completedCapsules >= dailyGoalProgress.targetCapsules);
+    const raffleEntriesAwarded = earnedRaffleEntry ? Number(existingReward?.entries ?? 1) || 1 : 0;
+    if (earnedRaffleEntry && !existingReward && attempt.scholarId) {
+      await this.db
+        .collection('raffleEntries')
+        .doc(`raffle-entry-capsule-target-${attempt.id}`)
+        .set(
+          {
+            id: `raffle-entry-capsule-target-${attempt.id}`,
+            userId: attempt.scholarId,
+            scholarId: attempt.scholarId,
+            raffleId: 'daily-capsule-target-raffle',
+            source: 'daily-capsule-target',
+            sourceCapsuleAttemptId: attempt.id,
+            title: 'Daily Capsule Target Raffle Entry',
+            entries: 1,
+            earnedAtUtc: completedAtUtc,
+            status: 'active',
+          },
+          { merge: false },
+        );
+    }
+
+    return removeUndefinedProperties({
+      ...base,
+      completedQuestions: questionCount,
+      correctAnswers,
+      completionTimeSeconds,
+      completedAtUtc,
+      markedForReviewCount,
+      packProgress: {
+        completedCapsules: completedPackCapsules,
+        totalCapsules: totalPackCapsules,
+        progressPercentage: totalPackCapsules
+          ? clampPercentage((completedPackCapsules / totalPackCapsules) * 100)
+          : 0,
+      },
+      dailyGoalProgress,
+      reward: {
+        earnedRaffleEntry,
+        raffleEntriesAwarded,
+        message: earnedRaffleEntry
+          ? 'You earned a raffle entry for completing today’s capsule target.'
+          : undefined,
+      },
+      nextCapsuleUrl: nextCapsule ? `/capsules/start/${nextCapsule.id}` : null,
+      learningPackUrl: learningPack?.id ? `/learning-packs/${learningPack.id}` : '/learning-packs',
+      todayProgressUrl: '/dashboard',
+      endSessionUrl: '/dashboard',
+    });
+  }
+
+  private async getDailyCapsuleProgress(
+    scholarId: string | undefined,
+    enrollment: any,
+    attempts: any[],
+  ) {
+    const dashboard = (await this.getDashboard()) as any;
+    const timeZone =
+      enrollment?.cohortTimeZone ?? enrollment?.timeZone ?? dashboard.cohortTimeZone ?? 'UTC';
+    const todayStart = dayStartInTimeZoneUtc(new Date(), timeZone).getTime();
+    const tomorrowStart = todayStart + 86400000;
+    const completedCapsules = attempts.filter((attempt: any) => {
+      if (scholarId && attempt.scholarId !== scholarId) return false;
+      const completedAt = toDate(attempt.completedAtUtc ?? attempt.completedAt)?.getTime();
+      return completedAt !== undefined && completedAt >= todayStart && completedAt < tomorrowStart;
+    }).length;
+    const targetCapsules = Number(enrollment?.dailyTarget ?? dashboard.dailyTarget) || 0;
+    return {
+      completedCapsules,
+      targetCapsules,
+      progressPercentage: targetCapsules
+        ? clampPercentage((completedCapsules / targetCapsules) * 100)
+        : 0,
+    };
   }
 
   private formatResumeQuestion(
@@ -1196,6 +1367,9 @@ export class LearningRepository {
     if (scholarId && attempt.scholarId && attempt.scholarId !== scholarId) return null;
     if (attempt.closedAtUtc || attempt.status === 'closed' || attempt.status === 'cancelled')
       return 'closed' as const;
+    if (attempt.completedAtUtc || attempt.status === 'complete') {
+      return { capsuleAttemptId, complete: true };
+    }
     const current = (await this.getById(
       'questionAttempts',
       attempt.currentQuestionAttemptId,
