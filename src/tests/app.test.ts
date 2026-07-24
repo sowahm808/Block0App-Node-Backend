@@ -434,7 +434,6 @@ describe('MindUnlocking API', () => {
       '/review/history',
       '/admin/dashboard',
       '/admin/users',
-      '/admin/system-settings',
       '/readiness',
     ]) {
       const response = await app.inject(`/api/v1${path}`);
@@ -442,7 +441,14 @@ describe('MindUnlocking API', () => {
       expect(response.json().data).toBeTruthy();
     }
 
-    const systemSettings = await app.inject('/api/v1/admin/system-settings');
+    const adminAccess = await svc.signAccessToken('admin-user', 'admin@example.com', [
+      'admin.system.read',
+    ]);
+    const systemSettings = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/system-settings',
+      headers: { authorization: `Bearer ${adminAccess.token}` },
+    });
     expect(systemSettings.statusCode).toBe(200);
     expect(systemSettings.json().data).toMatchObject({
       id: 'default',

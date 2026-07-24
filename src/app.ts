@@ -20,6 +20,7 @@ import { LearningRepository } from './modules/learning/learning.repository.js';
 import { learningRoutes } from './modules/learning/learning.routes.js';
 import { NotificationsRepository } from './modules/notifications/notifications.repository.js';
 import { notificationsRoutes } from './modules/notifications/notifications.routes.js';
+import { adminRoutes } from './modules/learning/admin.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -295,6 +296,7 @@ export async function buildApp(overrides?: any) {
       await v1.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await v1.register(learningRoutes, { learning, authService, users } as any);
+      await v1.register(adminRoutes, { learning, authService } as any);
       await v1.register(notificationsRoutes, {
         prefix: '/notifications',
         notifications,
@@ -314,6 +316,7 @@ export async function buildApp(overrides?: any) {
       await api.register(authRoutes, { prefix: '/auth', authService, sessions } as any);
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await api.register(learningRoutes, { learning, authService, users } as any);
+      await api.register(adminRoutes, { learning, authService } as any);
       await api.register(notificationsRoutes, {
         prefix: '/notifications',
         notifications,

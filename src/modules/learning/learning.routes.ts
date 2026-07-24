@@ -19,6 +19,14 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     await authenticate(authService)(request);
   };
 
+  const requireAdminPermission = (permission: string) => async (request: any) => {
+    await requireAuth(request);
+    const permissions = request.user?.permissions ?? [];
+    if (!permissions.includes('*') && !permissions.includes(permission)) {
+      throw new ForbiddenError(`Missing permission: ${permission}`);
+    }
+  };
+
   const requireAdminOrReviewer = async (request: any) => {
     await requireAuth(request);
     const permissions = request.user?.permissions ?? [];
@@ -143,7 +151,15 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/admin/users', async () => ({ data: users?.list ? await users.list() : [] }));
 
-  app.get('/admin/system-settings', async () => ({ data: await learning.getSystemSettings() }));
+  app.get(
+    '/admin/system-settings',
+    { preHandler: requireAdminPermission('admin.system.read') },
+    async () => ({
+      data: (learning as any).getSanitizedSystemSettings
+        ? await (learning as any).getSanitizedSystemSettings()
+        : await (learning as any).getSystemSettings(),
+    }),
+  );
 
   app.get('/readiness', async () => ({ data: await learning.getReadiness() }));
 
