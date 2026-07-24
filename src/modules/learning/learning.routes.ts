@@ -625,7 +625,61 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     rewards: await learning.listRewards(),
   }));
 
-  app.get('/certificates', async () => ({ data: await learning.listCertificates() }));
+  app.get(
+    '/certificates',
+    {
+      preHandler:
+        authService && 'getCertificateStatus' in learning ? requireScholarAccess : undefined,
+    },
+    async (request) =>
+      'getCertificateStatus' in learning
+        ? await (learning as any).getCertificateStatus(
+            request.user?.uid ?? 'anonymous-scholar',
+            request.user,
+          )
+        : { data: await (learning as any).listCertificates() },
+  );
+
+  app.post(
+    '/certificates/generate',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      if (!('generateCertificate' in learning))
+        throw new ConflictError('Certificate generation is not configured');
+      const certificate = await (learning as any).generateCertificate(
+        request.user?.uid ?? 'anonymous-scholar',
+        request.user,
+      );
+      if (certificate === 'ineligible') {
+        throw new ConflictError('Certificate requirements are not complete');
+      }
+      return { generationState: 'generated', certificate };
+    },
+  );
+
+  app.get('/certificates/:certificateNumber/pdf', async (request, reply) => {
+    const { certificateNumber } = request.params as { certificateNumber: string };
+    const certificate =
+      'getCertificateByNumber' in learning
+        ? await (learning as any).getCertificateByNumber(certificateNumber)
+        : null;
+    if (!certificate) throw new NotFoundError('Certificate not found');
+    const body = `%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`;
+    return reply
+      .header('content-type', 'application/pdf')
+      .header('content-disposition', `attachment; filename="${certificateNumber}.pdf"`)
+      .send(Buffer.from(body));
+  });
+
+  app.get('/public/certificates/verify/:verificationCode', async (request) => {
+    const { verificationCode } = request.params as { verificationCode: string };
+    const verification =
+      'verifyCertificate' in learning
+        ? await (learning as any).verifyCertificate(verificationCode)
+        : null;
+    if (!verification) throw new NotFoundError('Certificate not found');
+    return verification;
+  });
 
   app.get('/raffle-entries', { preHandler: requireScholarAccess }, async (request) =>
     learning.listRaffleEntries(request.user!.uid),
