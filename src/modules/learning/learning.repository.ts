@@ -913,47 +913,143 @@ export class LearningRepository {
     };
   }
 
-  async resumeCapsuleAttempt(capsuleAttemptId: string) {
-    const attempt = await this.getById('capsuleAttempts', capsuleAttemptId, sampleCapsuleAttempts);
+  async resumeCapsuleAttempt(capsuleAttemptId: string, scholarId?: string) {
+    const attempt = (await this.getById(
+      'capsuleAttempts',
+      capsuleAttemptId,
+      sampleCapsuleAttempts,
+    )) as any;
     if (!attempt) return null;
-    const capsule = await this.getById('capsules', attempt.capsuleId, sampleCapsules);
-    const questionAttempt = await this.getById(
+    if (scholarId && attempt.scholarId && attempt.scholarId !== scholarId) return null;
+    if (attempt.closedAtUtc || attempt.status === 'closed' || attempt.status === 'cancelled') {
+      return 'closed' as const;
+    }
+
+    const capsule = (await this.getById('capsules', attempt.capsuleId, sampleCapsules)) as any;
+    if (!capsule) return null;
+    const learningPack = capsule.learningPackId
+      ? ((await this.getById('learningPacks', capsule.learningPackId, sampleLearningPacks)) as any)
+      : null;
+    const allQuestions = (await this.listCollectionOrSeed('questions', sampleQuestions)) as any[];
+    const capsuleQuestions = allQuestions
+      .filter((question: any) => question.capsuleId === capsule.id)
+      .sort((left: any, right: any) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0))
+      .slice(0, 4);
+    const questionCount = Number(attempt.totalQuestions ?? capsule.questionCount) || 4;
+    const completedQuestions = Math.min(Number(attempt.completedQuestions) || 0, questionCount);
+    const complete =
+      !!attempt.completedAtUtc ||
+      attempt.status === 'complete' ||
+      completedQuestions >= questionCount;
+    const startedAt = toDate(attempt.startedAtUtc ?? attempt.createdAtUtc)?.getTime() ?? Date.now();
+    const durationSeconds =
+      Number(attempt.durationSeconds ?? capsule.durationSeconds ?? 600) || 600;
+    const remainingSeconds = Math.max(
+      durationSeconds - Math.floor((Date.now() - startedAt) / 1000),
+      0,
+    );
+    const base = {
+      capsuleAttemptId: attempt.id,
+      title: capsule.title,
+      learningPackTitle: learningPack?.title ?? capsule.learningPackTitle ?? '',
+      capsuleNumber: Number(capsule.capsuleNumber ?? capsule.sequence) || 1,
+      questionCount,
+      completedQuestions,
+      remainingSeconds,
+      complete,
+    } as any;
+    if (complete) return base;
+
+    const questionAttempt = (await this.getById(
       'questionAttempts',
       attempt.currentQuestionAttemptId,
       sampleQuestionAttempts,
-    );
+    )) as any;
     const question = questionAttempt
-      ? await this.getById('questions', questionAttempt.questionId, sampleQuestions)
+      ? ((await this.getById('questions', questionAttempt.questionId, sampleQuestions)) as any)
       : null;
-    if (!capsule || !questionAttempt || !question) return null;
-    const w1Question = { ...(question as any) };
-    delete w1Question.correctChoiceId;
-    delete w1Question.correctRationale;
-    delete w1Question.incorrectRationales;
-    delete w1Question.explanation;
+    if (!questionAttempt || !question || questionAttempt.capsuleAttemptId !== attempt.id)
+      return null;
+    const questionNumber = Math.min(
+      Math.max(
+        capsuleQuestions.findIndex((item: any) => item.id === question.id) + 1,
+        completedQuestions + 1,
+      ),
+      questionCount,
+    );
+    base.nextQuestion = {
+      attemptId: questionAttempt.id,
+      stem: question.stem,
+      choices: question.choices ?? [],
+      questionNumber,
+      capsuleProgress: `${questionNumber} of ${questionCount}`,
+      markedForReview: !!questionAttempt.markedForReview,
+    };
+    if (questionAttempt.submittedAtUtc) {
+      const explanation = (await this.getByField(
+        'questionExplanations',
+        'questionId',
+        questionAttempt.questionId,
+        sampleQuestionExplanations,
+      )) as any;
+      base.submission = explanation
+        ? this.formatSubmittedQuestion(questionAttempt, explanation)
+        : {
+            selectedChoiceId: questionAttempt.choiceId,
+            correct: questionAttempt.correct,
+          };
+    }
+    return base;
+  }
+
+  private formatSubmittedQuestion(questionAttempt: any, explanation: any) {
     return {
-      capsuleAttemptId: attempt.id,
-      capsule: { id: capsule.id, title: capsule.title, summary: capsule.summary },
-      progress: { completedQuestions: attempt.completedQuestions, totalQuestions: 1 },
-      questionAttemptId: questionAttempt.id,
-      markedForReview: questionAttempt.markedForReview,
-      question: w1Question,
+      selectedChoiceId: questionAttempt.choiceId,
+      correctChoiceId: explanation.correctChoiceId,
+      correct: !!questionAttempt.correct,
+      correctRationale: explanation.correctRationale,
+      incorrectRationales: explanation.incorrectRationales,
+      reference: explanation.reference,
+      memory: explanation.memory,
     };
   }
 
   async submitQuestionAttempt(
     capsuleAttemptId: string,
     questionAttemptId: string,
-    body: { choiceId: string; elapsedMs?: number; markedForReview?: boolean },
+    body: {
+      choiceId: string;
+      elapsedMs?: number;
+      markedForReview?: boolean;
+      submittedAtUtc?: string;
+    },
+    scholarId?: string,
   ) {
-    const attempt = await this.getById('capsuleAttempts', capsuleAttemptId, sampleCapsuleAttempts);
-    const questionAttempt = await this.getById(
+    const attempt = (await this.getById(
+      'capsuleAttempts',
+      capsuleAttemptId,
+      sampleCapsuleAttempts,
+    )) as any;
+    const questionAttempt = (await this.getById(
       'questionAttempts',
       questionAttemptId,
       sampleQuestionAttempts,
-    );
+    )) as any;
     if (!attempt || !questionAttempt || questionAttempt.capsuleAttemptId !== capsuleAttemptId)
       return null;
+    if (scholarId && attempt.scholarId && attempt.scholarId !== scholarId) return null;
+    if (attempt.closedAtUtc || attempt.status === 'closed' || attempt.status === 'cancelled') {
+      return 'closed' as const;
+    }
+    const question = (await this.getById(
+      'questions',
+      questionAttempt.questionId,
+      sampleQuestions,
+    )) as any;
+    if (!question) return null;
+    if (!(question.choices ?? []).some((choice: any) => choice.id === body.choiceId)) {
+      return 'invalid_choice' as const;
+    }
     const explanation = (await this.getByField(
       'questionExplanations',
       'questionId',
@@ -961,32 +1057,103 @@ export class LearningRepository {
       sampleQuestionExplanations,
     )) as any;
     if (!explanation) return null;
+    if (questionAttempt.submittedAtUtc) {
+      if (questionAttempt.choiceId === body.choiceId)
+        return this.formatSubmittedQuestion(questionAttempt, explanation);
+      return 'conflict' as const;
+    }
     const correct = explanation.correctChoiceId === body.choiceId;
+    const submittedAtUtc =
+      body.submittedAtUtc && !Number.isNaN(new Date(body.submittedAtUtc).getTime())
+        ? new Date(body.submittedAtUtc).toISOString()
+        : new Date().toISOString();
+    const updated = {
+      ...questionAttempt,
+      choiceId: body.choiceId,
+      selectedChoiceId: body.choiceId,
+      elapsedMs: Number(body.elapsedMs) || 0,
+      markedForReview: body.markedForReview ?? questionAttempt.markedForReview ?? false,
+      submittedAtUtc,
+      status: 'w2_submitted',
+      correct,
+      scholarId: attempt.scholarId,
+      updatedAtUtc: new Date().toISOString(),
+    };
     await this.db
       .collection('questionAttempts')
       .doc(questionAttemptId)
+      .set(updated, { merge: true });
+    return this.formatSubmittedQuestion(updated, explanation);
+  }
+
+  async advanceCapsuleAttempt(capsuleAttemptId: string, scholarId?: string) {
+    const attempt = (await this.getById(
+      'capsuleAttempts',
+      capsuleAttemptId,
+      sampleCapsuleAttempts,
+    )) as any;
+    if (!attempt) return null;
+    if (scholarId && attempt.scholarId && attempt.scholarId !== scholarId) return null;
+    if (attempt.closedAtUtc || attempt.status === 'closed' || attempt.status === 'cancelled')
+      return 'closed' as const;
+    const current = (await this.getById(
+      'questionAttempts',
+      attempt.currentQuestionAttemptId,
+      sampleQuestionAttempts,
+    )) as any;
+    if (!current || !current.submittedAtUtc) return 'conflict' as const;
+    const capsule = (await this.getById('capsules', attempt.capsuleId, sampleCapsules)) as any;
+    const questions = ((await this.listCollectionOrSeed('questions', sampleQuestions)) as any[])
+      .filter((question: any) => question.capsuleId === attempt.capsuleId)
+      .sort((left: any, right: any) => (Number(left.sequence) || 0) - (Number(right.sequence) || 0))
+      .slice(0, 4);
+    const currentIndex = questions.findIndex((question: any) => question.id === current.questionId);
+    const completedQuestions = Math.max(Number(attempt.completedQuestions) || 0, currentIndex + 1);
+    const questionCount = Number(attempt.totalQuestions ?? capsule?.questionCount) || 4;
+    const now = new Date().toISOString();
+    if (completedQuestions >= questionCount || currentIndex >= questions.length - 1) {
+      await this.db
+        .collection('capsuleAttempts')
+        .doc(capsuleAttemptId)
+        .set(
+          {
+            completedQuestions: questionCount,
+            status: 'complete',
+            completedAtUtc: now,
+            updatedAtUtc: now,
+          },
+          { merge: true },
+        );
+      return { capsuleAttemptId, complete: true };
+    }
+    const nextQuestion = questions[currentIndex + 1];
+    const nextQuestionAttemptId = `question-attempt_${capsuleAttemptId}_q${currentIndex + 2}`;
+    await this.db.collection('questionAttempts').doc(nextQuestionAttemptId).set(
+      {
+        id: nextQuestionAttemptId,
+        capsuleAttemptId,
+        scholarId: attempt.scholarId,
+        questionId: nextQuestion.id,
+        status: 'w1_active',
+        markedForReview: false,
+        createdAtUtc: now,
+        updatedAtUtc: now,
+      },
+      { merge: true },
+    );
+    await this.db
+      .collection('capsuleAttempts')
+      .doc(capsuleAttemptId)
       .set(
         {
-          ...questionAttempt,
-          choiceId: body.choiceId,
-          elapsedMs: body.elapsedMs ?? null,
-          markedForReview: body.markedForReview ?? questionAttempt.markedForReview,
-          submittedAtUtc: new Date().toISOString(),
-          correct,
+          completedQuestions,
+          currentQuestionAttemptId: nextQuestionAttemptId,
+          status: 'active',
+          updatedAtUtc: now,
         },
         { merge: true },
       );
-    return {
-      questionAttemptId,
-      capsuleAttemptId,
-      choiceId: body.choiceId,
-      correct,
-      correctChoiceId: explanation.correctChoiceId,
-      correctRationale: explanation.correctRationale,
-      incorrectRationales: explanation.incorrectRationales,
-      reference: explanation.reference,
-      memory: explanation.memory,
-    };
+    return { capsuleAttemptId, complete: false, nextQuestionAttemptId };
   }
 
   async importLearningPack(payload: LearningPackImportPayload, importedBy: string) {

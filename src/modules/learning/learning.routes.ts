@@ -1,5 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { NotFoundError, ForbiddenError, ValidationAppError } from '../common/errors.js';
+import {
+  NotFoundError,
+  ForbiddenError,
+  ValidationAppError,
+  ConflictError,
+} from '../common/errors.js';
 import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -234,15 +239,21 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     },
   );
 
-  app.get('/capsule-attempts/:capsuleAttemptId/resume', async (request) => {
-    const { capsuleAttemptId } = request.params as { capsuleAttemptId: string };
-    const resume = await learning.resumeCapsuleAttempt(capsuleAttemptId);
-    if (!resume) throw new NotFoundError('Capsule attempt not found');
-    return { data: resume };
-  });
+  app.get(
+    '/capsule-attempts/:capsuleAttemptId/resume',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { capsuleAttemptId } = request.params as { capsuleAttemptId: string };
+      const resume = await learning.resumeCapsuleAttempt(capsuleAttemptId, request.user?.uid);
+      if (!resume) throw new NotFoundError('Capsule attempt not found');
+      if (resume === 'closed') throw new ConflictError('Capsule attempt is closed');
+      return resume;
+    },
+  );
 
   app.post(
     '/capsule-attempts/:capsuleAttemptId/question-attempts/:questionAttemptId/submit',
+    { preHandler: authService ? requireScholarAccess : undefined },
     async (request) => {
       const { capsuleAttemptId, questionAttemptId } = request.params as {
         capsuleAttemptId: string;
@@ -252,9 +263,33 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
         capsuleAttemptId,
         questionAttemptId,
         request.body as any,
+        request.user?.uid,
       );
       if (!result) throw new NotFoundError('Question attempt not found');
-      return { data: result };
+      if (result === 'closed' || result === 'conflict')
+        throw new ConflictError('Question attempt cannot be submitted');
+      if (result === 'invalid_choice') {
+        throw new ValidationAppError({
+          choiceId: ['Choice does not belong to this question attempt'],
+        });
+      }
+      return result;
+    },
+  );
+
+  app.post(
+    '/capsule-attempts/:capsuleAttemptId/next',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { capsuleAttemptId } = request.params as { capsuleAttemptId: string };
+      const result = await (learning as any).advanceCapsuleAttempt(
+        capsuleAttemptId,
+        request.user?.uid,
+      );
+      if (!result) throw new NotFoundError('Capsule attempt not found');
+      if (result === 'closed' || result === 'conflict')
+        throw new ConflictError('Capsule attempt cannot advance');
+      return result;
     },
   );
 

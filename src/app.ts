@@ -220,10 +220,23 @@ export async function buildApp(overrides?: any) {
               ? {
                   capsuleAttemptId,
                   capsule: { id: capsule.id, title: capsule.title, summary: capsule.summary },
-                  progress: { completedQuestions: attempt.completedQuestions, totalQuestions: 1 },
-                  questionAttemptId: questionAttempt.id,
-                  markedForReview: questionAttempt.markedForReview,
-                  question,
+                  title: capsule.title,
+                  learningPackTitle:
+                    seed.sampleLearningPacks.find((pack) => pack.id === capsule.learningPackId)
+                      ?.title ?? '',
+                  capsuleNumber: capsule.sequence ?? 1,
+                  questionCount: 4,
+                  completedQuestions: attempt.completedQuestions,
+                  remainingSeconds: 600,
+                  nextQuestion: {
+                    attemptId: questionAttempt.id,
+                    stem: question.stem,
+                    choices: question.choices,
+                    questionNumber: 1,
+                    capsuleProgress: '1 of 4',
+                    markedForReview: questionAttempt.markedForReview,
+                  },
+                  complete: false,
                 }
               : null;
           },
@@ -241,9 +254,7 @@ export async function buildApp(overrides?: any) {
             );
             return explanation
               ? {
-                  questionAttemptId,
-                  capsuleAttemptId,
-                  choiceId: body.choiceId,
+                  selectedChoiceId: body.choiceId,
                   correct: explanation.correctChoiceId === body.choiceId,
                   correctChoiceId: explanation.correctChoiceId,
                   correctRationale: explanation.correctRationale,
@@ -253,6 +264,10 @@ export async function buildApp(overrides?: any) {
                 }
               : null;
           },
+          advanceCapsuleAttempt: async (capsuleAttemptId: string) => ({
+            capsuleAttemptId,
+            complete: true,
+          }),
           importLearningPack: async (payload: any, importedBy: string) => {
             const { validateLearningPackImport, importFailedSummary } =
               await import('./modules/learning/content-import.js');
