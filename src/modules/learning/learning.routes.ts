@@ -129,6 +129,18 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     async (request) => learning.listLearningPacks(request.user?.uid, request.query as any),
   );
 
+  app.get(
+    '/learning-packs/:packId',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { packId } = request.params as { packId: string };
+      const detail = await learning.getLearningPackDetail(request.user?.uid, packId);
+      if (detail === 'forbidden') throw new ForbiddenError('Learning pack is not visible');
+      if (!detail) throw new NotFoundError('Learning pack not found');
+      return detail;
+    },
+  );
+
   app.get('/rewards', async () => ({ data: await learning.listRewards() }));
 
   app.get('/certificates', async () => ({ data: await learning.listCertificates() }));
