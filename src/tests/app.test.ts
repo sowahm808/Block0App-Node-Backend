@@ -1909,3 +1909,246 @@ describe('MindUnlocking API', () => {
     expect(last.statusCode).toBe(429);
   });
 });
+
+describe('check-in history', () => {
+  let users: MemUsers, sessions: MemSessions, svc: AuthService;
+  beforeEach(() => {
+    users = new MemUsers();
+    sessions = new MemSessions();
+    svc = new AuthService(firebase() as any, users as any, sessions as any, env);
+  });
+
+  const makeDb = (collections: Record<string, any[]>) => ({
+    collection(name: string) {
+      const rows = collections[name] ?? [];
+      return {
+        where(field: string, _operator: string, value: string) {
+          const filtered = rows.filter((row) => row[field] === value);
+          return {
+            async get() {
+              return { docs: filtered.map((row) => ({ data: () => row })) };
+            },
+          };
+        },
+      };
+    },
+  });
+
+  it('returns authenticated scholar history with filters and summary', async () => {
+    const db = makeDb({
+      checkIns: [
+        {
+          scholarId: 'scholar-a',
+          kind: 'morning',
+          date: '2026-07-24',
+          confidence: 7,
+          goalText: 'Complete cardiology capsules',
+          needSupport: false,
+        },
+        {
+          scholarId: 'scholar-a',
+          kind: 'evening',
+          date: '2026-07-24',
+          confidence: 8,
+          goalMet: 'Yes',
+        },
+        {
+          scholarId: 'scholar-a',
+          kind: 'morning',
+          date: '2026-07-23',
+          confidence: 3,
+          goalText: 'Review pulmonary capsules',
+          needSupport: true,
+        },
+        {
+          scholarId: 'scholar-b',
+          kind: 'morning',
+          date: '2026-07-24',
+          confidence: 10,
+          goalText: 'Other scholar record',
+        },
+      ],
+      capsuleAttempts: [
+        { scholarId: 'scholar-a', completedAtUtc: '2026-07-24T12:00:00.000Z', status: 'complete' },
+        { scholarId: 'scholar-a', completedAtUtc: '2026-07-24T13:00:00.000Z', status: 'complete' },
+        { scholarId: 'scholar-a', completedAtUtc: '2026-07-24T14:00:00.000Z', status: 'complete' },
+        { scholarId: 'scholar-b', completedAtUtc: '2026-07-24T15:00:00.000Z', status: 'complete' },
+      ],
+      studySessions: [
+        { scholarId: 'scholar-a', recordedAtUtc: '2026-07-24T16:00:00.000Z', minutes: 95 },
+        { scholarId: 'scholar-b', recordedAtUtc: '2026-07-24T16:00:00.000Z', minutes: 500 },
+      ],
+    });
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+      learning: new LearningRepository(db as any),
+      seedLearning: false,
+    });
+    const access = await svc.signAccessToken('scholar-a', 'a@example.com', ['scholar:access']);
+
+    const response = await app.inject({
+      url: '/api/v1/check-ins/history?startDate=2026-07-24&endDate=2026-07-24&minConfidence=7&maxConfidence=8&goalCompletion=completed&supportRequested=false',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [
+        {
+          id: 'checkin_2026_07_24',
+          date: '2026-07-24',
+          morningConfidence: 7,
+          eveningConfidence: 8,
+          capsuleGoal: 'Complete cardiology capsules',
+          capsulesCompleted: 3,
+          goalResult: 'completed',
+          studyMinutes: 95,
+          supportRequested: false,
+        },
+      ],
+      summary: {
+        totalCheckIns: 1,
+        averageMorningConfidence: 7,
+        averageEveningConfidence: 8,
+        totalStudyMinutes: 95,
+        goalCompletionRate: 1,
+      },
+    });
+  });
+
+  it('applies each supported history filter before returning sorted items', async () => {
+    const repo = new LearningRepository(
+      makeDb({
+        checkIns: [
+          {
+            scholarId: 'scholar-a',
+            kind: 'morning',
+            date: '2026-07-25',
+            confidence: 9,
+            goalText: 'Renal review',
+            needSupport: true,
+          },
+          {
+            scholarId: 'scholar-a',
+            kind: 'evening',
+            date: '2026-07-25',
+            confidence: 6,
+            goalMet: 'Partially',
+          },
+          {
+            scholarId: 'scholar-a',
+            kind: 'morning',
+            date: '2026-07-24',
+            confidence: 4,
+            goalText: 'Cardiology review',
+            needSupport: false,
+          },
+          {
+            scholarId: 'scholar-a',
+            kind: 'evening',
+            date: '2026-07-24',
+            confidence: 5,
+            goalMet: 'No',
+          },
+          {
+            scholarId: 'scholar-a',
+            kind: 'morning',
+            date: '2026-07-23',
+            confidence: 7,
+            goalText: 'Pulmonary review',
+            needSupport: false,
+          },
+          {
+            scholarId: 'scholar-a',
+            kind: 'evening',
+            date: '2026-07-23',
+            confidence: 8,
+            goalMet: 'Yes',
+          },
+        ],
+        capsuleAttempts: [],
+        studySessions: [],
+      }) as any,
+    );
+
+    expect((await repo.getCheckInHistory('scholar-a')).items.map((item: any) => item.date)).toEqual(
+      ['2026-07-23', '2026-07-24', '2026-07-25'],
+    );
+    expect(
+      (await repo.getCheckInHistory('scholar-a', { startDate: '2026-07-24' })).items.map(
+        (item: any) => item.date,
+      ),
+    ).toEqual(['2026-07-24', '2026-07-25']);
+    expect(
+      (await repo.getCheckInHistory('scholar-a', { endDate: '2026-07-24' })).items.map(
+        (item: any) => item.date,
+      ),
+    ).toEqual(['2026-07-23', '2026-07-24']);
+    expect(
+      (await repo.getCheckInHistory('scholar-a', { minConfidence: 9 })).items.map(
+        (item: any) => item.date,
+      ),
+    ).toEqual(['2026-07-25']);
+    expect(
+      (await repo.getCheckInHistory('scholar-a', { maxConfidence: 5 })).items.map(
+        (item: any) => item.date,
+      ),
+    ).toEqual(['2026-07-24']);
+    expect(
+      (await repo.getCheckInHistory('scholar-a', { goalCompletion: 'partial' })).items.map(
+        (item: any) => item.date,
+      ),
+    ).toEqual(['2026-07-25']);
+    expect(
+      (await repo.getCheckInHistory('scholar-a', { supportRequested: true })).items.map(
+        (item: any) => item.date,
+      ),
+    ).toEqual(['2026-07-25']);
+  });
+
+  it('returns empty history and rejects invalid filter ranges', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+      learning: new LearningRepository(
+        makeDb({ checkIns: [], capsuleAttempts: [], studySessions: [] }) as any,
+      ),
+      seedLearning: false,
+    });
+    const access = await svc.signAccessToken('scholar-empty', 'empty@example.com', [
+      'scholar:access',
+    ]);
+
+    const empty = await app.inject({
+      url: '/api/v1/check-ins/history',
+      headers: { authorization: `Bearer ${access.token}` },
+    });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toMatchObject({
+      items: [],
+      summary: { totalCheckIns: 0, totalStudyMinutes: 0, goalCompletionRate: 0 },
+    });
+
+    for (const query of [
+      'startDate=2026-07-25&endDate=2026-07-24',
+      'minConfidence=9&maxConfidence=4',
+      'goalCompletion=unknown',
+      'supportRequested=maybe',
+    ]) {
+      const invalid = await app.inject({
+        url: `/api/v1/check-ins/history?${query}`,
+        headers: { authorization: `Bearer ${access.token}` },
+      });
+      expect(invalid.statusCode).toBe(400);
+    }
+  });
+});

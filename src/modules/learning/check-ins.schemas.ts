@@ -54,3 +54,51 @@ export const eveningCheckInSchema = z
 export type CheckInInput = z.infer<typeof checkInSchema>;
 export type MorningCheckInInput = z.infer<typeof morningCheckInSchema>;
 export type EveningCheckInInput = z.infer<typeof eveningCheckInSchema>;
+
+const isValidDateOnly = (value: string) => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+const dateOnlySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected ISO date in YYYY-MM-DD format')
+  .refine(isValidDateOnly, 'Expected a valid ISO date');
+const booleanQuerySchema = z.preprocess((value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return value;
+  if (value.toLowerCase() === 'true') return true;
+  if (value.toLowerCase() === 'false') return false;
+  return value;
+}, z.boolean());
+
+export const checkInHistoryGoalResults = ['completed', 'partial', 'missed'] as const;
+
+export const checkInHistoryQuerySchema = z
+  .object({
+    startDate: dateOnlySchema.optional(),
+    endDate: dateOnlySchema.optional(),
+    minConfidence: z.coerce.number().int().min(1).max(10).optional(),
+    maxConfidence: z.coerce.number().int().min(1).max(10).optional(),
+    goalCompletion: z.enum(checkInHistoryGoalResults).optional(),
+    supportRequested: booleanQuerySchema.optional(),
+  })
+  .strict()
+  .superRefine((query, ctx) => {
+    if (query.startDate && query.endDate && query.startDate > query.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endDate'],
+        message: 'endDate must be on or after startDate',
+      });
+    }
+    if (query.minConfidence && query.maxConfidence && query.minConfidence > query.maxConfidence) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['maxConfidence'],
+        message: 'maxConfidence must be greater than or equal to minConfidence',
+      });
+    }
+  });
+
+export type CheckInHistoryQuery = z.infer<typeof checkInHistoryQuerySchema>;
