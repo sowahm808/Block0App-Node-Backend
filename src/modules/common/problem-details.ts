@@ -17,8 +17,12 @@ export function problemDetails(error: Error, request: FastifyRequest) {
       : status === 429
         ? 'Too Many Requests'
         : 'Internal Server Error');
+  const type =
+    app?.code === 'account_disabled'
+      ? 'https://api.blockzero.example/problems/account-disabled'
+      : `https://httpstatuses.com/${status}`;
   return {
-    type: `https://httpstatuses.com/${status}`,
+    type,
     title,
     status,
     detail:

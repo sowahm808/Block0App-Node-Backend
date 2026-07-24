@@ -40,6 +40,12 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 - `GET /api/v1/notification-preferences` requires authentication and returns `{ preferences }` with in-app, email, push, topic, and quiet-hours settings.
 - `PUT /api/v1/notification-preferences` requires authentication, validates the same preference shape returned by `GET`, requires quiet-hour times as `HH:mm`, validates quiet-hour `timeZone` as an IANA identifier, and persists the settings for the current user.
 
+## Restricted accounts
+
+Interactive browser flows for disabled, suspended, locked, deleted, or otherwise restricted accounts should redirect to `/account-disabled` with only safe user-facing context: `email` (or compatible `accountEmail`/`userEmail`) and `referenceId` (or compatible `correlationId`/`traceId`/`requestId`) when those values are available. Internal suspension notes, admin notes, risk scores, abuse signals, moderator comments, evidence, and detailed policy labels must remain server-side.
+
+API requests from restricted accounts return `423 Locked` with the account-disabled Problem Details type, title `Account access restricted`, safe detail text, and the request `traceId`/`correlationId` for support lookup. Login and refresh check account status before issuing backend tokens, and logout remains available/no-op so clients can clear local sessions.
+
 ## Authenticated
 
 - `GET /api/v1/auth/me`
