@@ -81,6 +81,49 @@ export async function buildApp(overrides?: any) {
           async getExamReminder(userId: string) {
             return this.data.get(userId) ?? null;
           },
+          notificationsData: new Map<string, any[]>(),
+          preferencesData: new Map<string, any>(),
+          async listNotifications(userId: string) {
+            return (this.notificationsData.get(userId) ?? [])
+              .slice()
+              .sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
+          },
+          async markAllRead(userId: string) {
+            const readAt = new Date().toISOString();
+            let markedRead = 0;
+            const notifications = this.notificationsData.get(userId) ?? [];
+            notifications.forEach((notification: any) => {
+              if (!notification.readAt) {
+                notification.readAt = readAt;
+                markedRead += 1;
+              }
+            });
+            return markedRead;
+          },
+          async getPreferences(userId: string) {
+            return (
+              this.preferencesData.get(userId) ?? {
+                inApp: true,
+                email: true,
+                push: false,
+                studyReminders: true,
+                teamActivity: true,
+                supportUpdates: true,
+                rewardUpdates: true,
+                certificateUpdates: true,
+                quietHours: {
+                  enabled: false,
+                  startTime: '21:00',
+                  endTime: '07:00',
+                  timeZone: 'America/New_York',
+                },
+              }
+            );
+          },
+          async savePreferences(userId: string, preferences: any) {
+            this.preferencesData.set(userId, preferences);
+            return preferences;
+          },
         }
       : new NotificationsRepository(getFirebase().db));
   const learning =
@@ -656,11 +699,13 @@ export async function buildApp(overrides?: any) {
         prefix: '/notifications',
         notifications,
         authService,
+        mode: 'notifications',
       } as any);
       await v1.register(notificationsRoutes, {
         prefix: '/notification-preferences',
         notifications,
         authService,
+        mode: 'preferences',
       } as any);
     },
     { prefix: '/api/v1' },
@@ -676,11 +721,13 @@ export async function buildApp(overrides?: any) {
         prefix: '/notifications',
         notifications,
         authService,
+        mode: 'notifications',
       } as any);
       await api.register(notificationsRoutes, {
         prefix: '/notification-preferences',
         notifications,
         authService,
+        mode: 'preferences',
       } as any);
     },
     { prefix: '/api' },

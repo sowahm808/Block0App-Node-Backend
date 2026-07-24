@@ -33,6 +33,13 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 - `POST /api/v1/auth/forgot-password` normalizes the email, requests a Firebase reset link when possible, and always returns `204 No Content` to avoid account enumeration.
 - `POST /api/v1/auth/reset-password` documents Firebase action-link completion.
 
+## Notifications
+
+- `GET /api/v1/notifications` requires authentication and returns `{ notifications: [...] }` for the current user, newest first. Each item includes `id`, `type`, `title`, `message`, `createdAt`, `readAt`, and optional `action`.
+- `POST /api/v1/notifications/mark-all-read` requires authentication, marks all unread notifications for the current user as read, and returns `{ markedRead }`.
+- `GET /api/v1/notification-preferences` requires authentication and returns `{ preferences }` with in-app, email, push, topic, and quiet-hours settings.
+- `PUT /api/v1/notification-preferences` requires authentication, validates the same preference shape returned by `GET`, requires quiet-hour times as `HH:mm`, validates quiet-hour `timeZone` as an IANA identifier, and persists the settings for the current user.
+
 ## Authenticated
 
 - `GET /api/v1/auth/me`
