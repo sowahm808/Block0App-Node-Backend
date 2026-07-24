@@ -266,12 +266,38 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
         request.user?.uid,
       );
       if (!result) throw new NotFoundError('Question attempt not found');
-      if (result === 'closed' || result === 'conflict')
+      if (result === 'closed' || result === 'conflict' || result === 'duplicate')
         throw new ConflictError('Question attempt cannot be submitted');
       if (result === 'invalid_choice') {
         throw new ValidationAppError({
           choiceId: ['Choice does not belong to this question attempt'],
+          choiceIds: ['One or more choices do not belong to this question attempt'],
         });
+      }
+      if (result === 'missing_answer') {
+        throw new ValidationAppError({ answer: ['At least one answer is required'] });
+      }
+      if (result === 'invalid_selection_count') {
+        throw new ValidationAppError({
+          choiceIds: ['Selection count is outside the allowed range'],
+        });
+      }
+      if (result === 'invalid_numeric') {
+        throw new ValidationAppError({ numericAnswer: ['Numeric answer must be a finite number'] });
+      }
+      return result;
+    },
+  );
+
+  app.post(
+    '/question-attempts/:attemptId/acknowledge-memory',
+    { preHandler: authService ? requireScholarAccess : undefined },
+    async (request) => {
+      const { attemptId } = request.params as { attemptId: string };
+      const result = await learning.acknowledgeMemory(attemptId, request.user?.uid);
+      if (!result) throw new NotFoundError('Question attempt not found');
+      if (result === 'conflict') {
+        throw new ConflictError('Memory cannot be acknowledged before submission');
       }
       return result;
     },

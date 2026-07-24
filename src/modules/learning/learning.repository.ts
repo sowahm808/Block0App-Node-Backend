@@ -977,14 +977,12 @@ export class LearningRepository {
       ),
       questionCount,
     );
-    base.nextQuestion = {
-      attemptId: questionAttempt.id,
-      stem: question.stem,
-      choices: question.choices ?? [],
+    base.nextQuestion = this.formatResumeQuestion(
+      questionAttempt,
+      question,
       questionNumber,
-      capsuleProgress: `${questionNumber} of ${questionCount}`,
-      markedForReview: !!questionAttempt.markedForReview,
-    };
+      questionCount,
+    );
     if (questionAttempt.submittedAtUtc) {
       const explanation = (await this.getByField(
         'questionExplanations',
@@ -1002,23 +1000,62 @@ export class LearningRepository {
     return base;
   }
 
+  private formatResumeQuestion(
+    questionAttempt: any,
+    question: any,
+    questionNumber: number,
+    questionCount: number,
+  ) {
+    const answerType = question.answerType ?? 'single_answer';
+    return removeUndefinedProperties({
+      attemptId: questionAttempt.id,
+      questionNumber,
+      capsuleProgress: `${questionNumber} of ${questionCount}`,
+      stem: question.stem,
+      markedForReview: !!questionAttempt.markedForReview,
+      choices: ['single_answer', 'multiple_select'].includes(answerType)
+        ? (question.choices ?? []).map((choice: any) => ({
+            id: choice.id,
+            label: choice.label,
+            text: choice.text,
+          }))
+        : undefined,
+      answerType,
+      minSelections: question.minSelections,
+      maxSelections: question.maxSelections,
+      unit: question.unit,
+      maxLength: question.maxLength,
+      figureUrl: question.figureUrl,
+      figureAlt: question.figureAlt,
+      tableHtml: question.tableHtml,
+      supportingMediaUrl: question.supportingMediaUrl,
+    });
+  }
+
   private formatSubmittedQuestion(questionAttempt: any, explanation: any) {
-    return {
-      selectedChoiceId: questionAttempt.choiceId,
+    return removeUndefinedProperties({
+      selectedChoiceId: questionAttempt.selectedChoiceId ?? questionAttempt.choiceId,
+      selectedChoiceIds: questionAttempt.selectedChoiceIds,
       correctChoiceId: explanation.correctChoiceId,
+      correctChoiceIds: explanation.correctChoiceIds,
       correct: !!questionAttempt.correct,
       correctRationale: explanation.correctRationale,
       incorrectRationales: explanation.incorrectRationales,
+      referenceTitle: explanation.referenceTitle,
       reference: explanation.reference,
+      referenceUrl: explanation.referenceUrl,
       memory: explanation.memory,
-    };
+    });
   }
 
   async submitQuestionAttempt(
     capsuleAttemptId: string,
     questionAttemptId: string,
     body: {
-      choiceId: string;
+      choiceId?: string;
+      choiceIds?: string[];
+      numericAnswer?: number | string;
+      shortAnswer?: string;
       elapsedMs?: number;
       markedForReview?: boolean;
       submittedAtUtc?: string;
@@ -1047,8 +1084,35 @@ export class LearningRepository {
       sampleQuestions,
     )) as any;
     if (!question) return null;
-    if (!(question.choices ?? []).some((choice: any) => choice.id === body.choiceId)) {
-      return 'invalid_choice' as const;
+    const answerType = question.answerType ?? 'single_answer';
+    const choiceIds = answerType === 'multiple_select' ? [...new Set(body.choiceIds ?? [])] : [];
+    if (questionAttempt.submittedAtUtc) return 'duplicate' as const;
+    if (answerType === 'single_answer') {
+      if (!body.choiceId) return 'missing_answer' as const;
+      if (!(question.choices ?? []).some((choice: any) => choice.id === body.choiceId)) {
+        return 'invalid_choice' as const;
+      }
+    } else if (answerType === 'multiple_select') {
+      if (!choiceIds.length) return 'missing_answer' as const;
+      const validChoiceIds = new Set((question.choices ?? []).map((choice: any) => choice.id));
+      if (choiceIds.some((choiceId: string) => !validChoiceIds.has(choiceId)))
+        return 'invalid_choice' as const;
+      const minSelections = Number(question.minSelections ?? 1);
+      const maxSelections = Number(question.maxSelections ?? (question.choices ?? []).length);
+      if (choiceIds.length < minSelections || choiceIds.length > maxSelections) {
+        return 'invalid_selection_count' as const;
+      }
+    } else if (answerType === 'numeric') {
+      if (
+        body.numericAnswer === undefined ||
+        body.numericAnswer === null ||
+        body.numericAnswer === ''
+      ) {
+        return 'missing_answer' as const;
+      }
+      if (!Number.isFinite(Number(body.numericAnswer))) return 'invalid_numeric' as const;
+    } else if (answerType === 'short_response' && !String(body.shortAnswer ?? '').trim()) {
+      return 'missing_answer' as const;
     }
     const explanation = (await this.getByField(
       'questionExplanations',
@@ -1057,20 +1121,30 @@ export class LearningRepository {
       sampleQuestionExplanations,
     )) as any;
     if (!explanation) return null;
-    if (questionAttempt.submittedAtUtc) {
-      if (questionAttempt.choiceId === body.choiceId)
-        return this.formatSubmittedQuestion(questionAttempt, explanation);
-      return 'conflict' as const;
-    }
-    const correct = explanation.correctChoiceId === body.choiceId;
+    const sorted = (values: string[]) => [...values].sort();
+    const correct =
+      answerType === 'multiple_select'
+        ? JSON.stringify(sorted(choiceIds)) ===
+          JSON.stringify(sorted(explanation.correctChoiceIds ?? []))
+        : answerType === 'numeric'
+          ? Number(body.numericAnswer) === Number(explanation.numericAnswer)
+          : answerType === 'short_response'
+            ? (explanation.acceptedAnswers ?? []).some(
+                (answer: string) =>
+                  answer.toLowerCase() === String(body.shortAnswer).trim().toLowerCase(),
+              )
+            : explanation.correctChoiceId === body.choiceId;
     const submittedAtUtc =
       body.submittedAtUtc && !Number.isNaN(new Date(body.submittedAtUtc).getTime())
         ? new Date(body.submittedAtUtc).toISOString()
         : new Date().toISOString();
     const updated = {
       ...questionAttempt,
-      choiceId: body.choiceId,
-      selectedChoiceId: body.choiceId,
+      choiceId: answerType === 'single_answer' ? body.choiceId : null,
+      selectedChoiceId: answerType === 'single_answer' ? body.choiceId : undefined,
+      selectedChoiceIds: answerType === 'multiple_select' ? choiceIds : undefined,
+      numericAnswer: answerType === 'numeric' ? Number(body.numericAnswer) : undefined,
+      shortAnswer: answerType === 'short_response' ? String(body.shortAnswer).trim() : undefined,
       elapsedMs: Number(body.elapsedMs) || 0,
       markedForReview: body.markedForReview ?? questionAttempt.markedForReview ?? false,
       submittedAtUtc,
@@ -1084,6 +1158,32 @@ export class LearningRepository {
       .doc(questionAttemptId)
       .set(updated, { merge: true });
     return this.formatSubmittedQuestion(updated, explanation);
+  }
+
+  async acknowledgeMemory(questionAttemptId: string, scholarId?: string) {
+    const questionAttempt = (await this.getById(
+      'questionAttempts',
+      questionAttemptId,
+      sampleQuestionAttempts,
+    )) as any;
+    if (!questionAttempt) return null;
+    const attempt = (await this.getById(
+      'capsuleAttempts',
+      questionAttempt.capsuleAttemptId,
+      sampleCapsuleAttempts,
+    )) as any;
+    if (!attempt) return null;
+    if (scholarId && attempt.scholarId && attempt.scholarId !== scholarId) return null;
+    if (!questionAttempt.submittedAtUtc) return 'conflict' as const;
+    const acknowledgedAtUtc = questionAttempt.memoryAcknowledgedAtUtc ?? new Date().toISOString();
+    await this.db
+      .collection('questionAttempts')
+      .doc(questionAttemptId)
+      .set(
+        { memoryAcknowledgedAtUtc: acknowledgedAtUtc, updatedAtUtc: acknowledgedAtUtc },
+        { merge: true },
+      );
+    return { acknowledged: true, acknowledgedAtUtc };
   }
 
   async advanceCapsuleAttempt(capsuleAttemptId: string, scholarId?: string) {
@@ -1101,7 +1201,8 @@ export class LearningRepository {
       attempt.currentQuestionAttemptId,
       sampleQuestionAttempts,
     )) as any;
-    if (!current || !current.submittedAtUtc) return 'conflict' as const;
+    if (!current || !current.submittedAtUtc || !current.memoryAcknowledgedAtUtc)
+      return 'conflict' as const;
     const capsule = (await this.getById('capsules', attempt.capsuleId, sampleCapsules)) as any;
     const questions = ((await this.listCollectionOrSeed('questions', sampleQuestions)) as any[])
       .filter((question: any) => question.capsuleId === attempt.capsuleId)
@@ -1112,18 +1213,15 @@ export class LearningRepository {
     const questionCount = Number(attempt.totalQuestions ?? capsule?.questionCount) || 4;
     const now = new Date().toISOString();
     if (completedQuestions >= questionCount || currentIndex >= questions.length - 1) {
-      await this.db
-        .collection('capsuleAttempts')
-        .doc(capsuleAttemptId)
-        .set(
-          {
-            completedQuestions: questionCount,
-            status: 'complete',
-            completedAtUtc: now,
-            updatedAtUtc: now,
-          },
-          { merge: true },
-        );
+      await this.db.collection('capsuleAttempts').doc(capsuleAttemptId).set(
+        {
+          completedQuestions: questionCount,
+          status: 'complete',
+          completedAtUtc: now,
+          updatedAtUtc: now,
+        },
+        { merge: true },
+      );
       return { capsuleAttemptId, complete: true };
     }
     const nextQuestion = questions[currentIndex + 1];
@@ -1141,18 +1239,15 @@ export class LearningRepository {
       },
       { merge: true },
     );
-    await this.db
-      .collection('capsuleAttempts')
-      .doc(capsuleAttemptId)
-      .set(
-        {
-          completedQuestions,
-          currentQuestionAttemptId: nextQuestionAttemptId,
-          status: 'active',
-          updatedAtUtc: now,
-        },
-        { merge: true },
-      );
+    await this.db.collection('capsuleAttempts').doc(capsuleAttemptId).set(
+      {
+        completedQuestions,
+        currentQuestionAttemptId: nextQuestionAttemptId,
+        status: 'active',
+        updatedAtUtc: now,
+      },
+      { merge: true },
+    );
     return { capsuleAttemptId, complete: false, nextQuestionAttemptId };
   }
 
