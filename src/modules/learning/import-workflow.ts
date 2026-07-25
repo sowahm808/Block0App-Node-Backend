@@ -219,12 +219,14 @@ export class LearningPackImportService {
   }
   async saveDraft(
     importId: string,
-    payload: LearningPackImportPayload,
+    payload: LearningPackImportPayload | { draft: LearningPackImportPayload },
     userId: string,
     tenantId?: string,
   ) {
     const record = await this.get(importId, tenantId);
-    if (!payload?.learningPack || !Array.isArray(payload.capsules))
+    // Detail responses nest editable content under `draft`; also accept that response shape.
+    const draft = payload && 'draft' in payload ? payload.draft : payload;
+    if (!draft?.learningPack || !Array.isArray(draft.capsules))
       throw new AppError(
         422,
         'Invalid draft',
@@ -235,7 +237,7 @@ export class LearningPackImportService {
       importId,
       ['uploaded', 'extracted', 'needs_review', 'validated', 'failed'],
       {
-        draft: { ...payload, sourceFileName: record.sourceFileName },
+        draft: { ...draft, sourceFileName: record.sourceFileName },
         contentVersion: String(Number(record.contentVersion) + 1),
         validatedVersion: null,
         validationErrors: [],
