@@ -116,10 +116,13 @@ describe('PDF extraction', () => {
 });
 
 describe('learning-pack import persistence', () => {
-  it('does not send undefined extraction fields to Firestore', async () => {
+  it('does not send undefined import fields to Firestore', async () => {
+    const created: Record<string, unknown>[] = [];
     const updates: Record<string, unknown>[] = [];
     const records = {
-      create: async () => undefined,
+      create: async (record: Record<string, unknown>) => {
+        created.push(record);
+      },
       update: async (_importId: string, changes: Record<string, unknown>) => {
         updates.push(changes);
         return null;
@@ -156,6 +159,9 @@ describe('learning-pack import persistence', () => {
       'trace-1',
     );
 
+    expect(created).toHaveLength(1);
+    expect(created[0]).not.toHaveProperty('tenantId');
+    expect(Object.values(created[0])).not.toContain(undefined);
     expect(updates).toHaveLength(1);
     expect(updates[0]).toHaveProperty('extractedText', document);
     expect(updates[0]).not.toHaveProperty('extractedTextStoragePath');

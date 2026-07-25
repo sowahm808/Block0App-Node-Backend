@@ -168,7 +168,7 @@ export class LearningPackImportService {
       uploadedAtUtc: now,
       updatedBy: userId,
       updatedAtUtc: now,
-      tenantId,
+      ...(tenantId === undefined ? {} : { tenantId }),
       traceId,
     });
     try {
