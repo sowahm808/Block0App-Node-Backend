@@ -168,4 +168,34 @@ describe('learning-pack import persistence', () => {
     expect(Object.values(updates[0])).not.toContain(undefined);
     expect(savedFiles).toHaveLength(1);
   });
+
+  it('accepts the draft wrapper returned by the import detail endpoint when saving', async () => {
+    const transitions: any[] = [];
+    const records = {
+      get: async () => ({
+        importId: 'imp_1234567890abcdef',
+        status: 'extracted',
+        contentVersion: '1',
+        sourceFileName: 'pack.pdf',
+      }),
+      transition: async (...args: any[]) => {
+        transitions.push(args);
+        return args[2];
+      },
+    };
+    const service = new LearningPackImportService(records as any, {} as any);
+    const draft = {
+      learningPack: { externalId: 'pack-1', title: 'Pack' },
+      capsules: [],
+    };
+
+    await service.saveDraft('imp_1234567890abcdef', { draft }, 'admin-1');
+
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0][2]).toMatchObject({
+      draft: { ...draft, sourceFileName: 'pack.pdf' },
+      contentVersion: '2',
+      status: 'needs_review',
+    });
+  });
 });

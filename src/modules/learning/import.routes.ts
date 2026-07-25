@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AuthService } from '../auth/auth.service.js';
 import { authenticate } from '../common/auth-middleware.js';
 import { AppError, ForbiddenError, ValidationAppError } from '../common/errors.js';
+import type { LearningPackImportPayload } from './content-import.js';
 import type { LearningPackImportService } from './import-workflow.js';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
@@ -174,7 +175,7 @@ export async function learningPackImportRoutes(
     (request) =>
       opts.imports.saveDraft(
         importId(request),
-        request.body as any,
+        request.body as LearningPackImportPayload | { draft: LearningPackImportPayload },
         request.user!.uid,
         tenant(request),
       ),
