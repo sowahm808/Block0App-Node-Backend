@@ -1,3 +1,10 @@
+import {
+  medicalTerminologyCapsules,
+  medicalTerminologyLearningPack,
+  medicalTerminologyQuestionExplanations,
+  medicalTerminologyQuestions,
+} from './medical-terminology.seed.js';
+
 export const sampleChallenges = [
   {
     id: 'block-zero-21-day-medical-exam-prep',
@@ -162,6 +169,7 @@ export const sampleLearningPacks = [
     createdBy: 'seed',
     reviewedBy: 'seed-reviewer',
   },
+  medicalTerminologyLearningPack,
 ];
 
 export const sampleCapsules = [
@@ -209,6 +217,7 @@ export const sampleCapsules = [
     dailyTarget: true,
     status: 'published',
   },
+  ...medicalTerminologyCapsules,
 ];
 
 export const sampleQuestions = [
@@ -279,6 +288,7 @@ export const sampleQuestions = [
     difficulty: 'foundational',
     status: 'published',
   },
+  ...medicalTerminologyQuestions,
 ];
 
 export const sampleQuestionExplanations = [
@@ -302,6 +312,7 @@ export const sampleQuestionExplanations = [
       mnemonic: 'Pivot, Predict, Pick.',
     },
   },
+  ...medicalTerminologyQuestionExplanations,
 ];
 
 export const sampleAssignments = [
