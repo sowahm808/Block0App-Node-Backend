@@ -15,6 +15,8 @@ export interface AuthenticatedPrincipal {
   role?: string;
   roles?: string[];
   emailVerified?: boolean;
+  tenantId?: string;
+  organizationId?: string;
 }
 declare module 'fastify' {
   interface FastifyRequest {

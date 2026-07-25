@@ -102,6 +102,19 @@ export async function learningPackImportRoutes(
       )
         throw new ForbiddenError('Missing permission: learning_packs.create');
     };
+  const tenant = (request: FastifyRequest) =>
+    request.user?.tenantId ?? request.user?.organizationId;
+  const importId = (request: FastifyRequest) => {
+    let value: string;
+    try {
+      value = decodeURIComponent((request.params as { importId: string }).importId);
+    } catch {
+      throw new AppError(404, 'Not Found', 'Learning-pack import not found', 'not_found');
+    }
+    if (!/^imp_[a-zA-Z0-9]{16,80}$/.test(value))
+      throw new AppError(404, 'Not Found', 'Learning-pack import not found', 'not_found');
+    return value;
+  };
   app.post(
     '/admin/learning-packs/imports',
     {
@@ -111,7 +124,7 @@ export async function learningPackImportRoutes(
         consumes: ['multipart/form-data'],
         security: [{ bearerAuth: [] }],
         response: {
-          202: {
+          201: {
             type: 'object',
             properties: {
               importId: { type: 'string' },
@@ -128,7 +141,12 @@ export async function learningPackImportRoutes(
     async (request, reply) => {
       const file = multipartFile(request.body as Buffer, String(request.headers['content-type']));
       validateFile(file);
-      const result = await opts.imports.upload(file, request.user!.uid, request.id);
+      const result = await opts.imports.upload(
+        file,
+        request.user!.uid,
+        request.id,
+        tenant(request),
+      );
       request.log.info(
         {
           importId: result.importId,
@@ -141,33 +159,34 @@ export async function learningPackImportRoutes(
         },
         'learning pack document imported',
       );
-      return reply.code(202).send(result);
+      return reply.code(201).send(result);
     },
   );
   app.get('/admin/learning-packs/imports', { preHandler: importAuth }, (request) =>
-    opts.imports.list(request.query as any),
+    opts.imports.list(request.query as any, tenant(request)),
   );
   app.get('/admin/learning-packs/imports/:importId', { preHandler: importAuth }, (request) =>
-    opts.imports.get((request.params as any).importId),
+    opts.imports.get(importId(request), tenant(request)),
   );
   app.put(
     '/admin/learning-packs/imports/:importId/draft',
     { preHandler: importAuth, bodyLimit: 2 * 1024 * 1024 },
     (request) =>
       opts.imports.saveDraft(
-        (request.params as any).importId,
+        importId(request),
         request.body as any,
         request.user!.uid,
+        tenant(request),
       ),
   );
   app.post(
     '/admin/learning-packs/imports/:importId/validate',
     { preHandler: importAuth },
-    (request) => opts.imports.validate((request.params as any).importId, request.user!.uid),
+    (request) => opts.imports.validate(importId(request), request.user!.uid, tenant(request)),
   );
   app.post(
     '/admin/learning-packs/imports/:importId/commit',
     { preHandler: commitAuth },
-    (request) => opts.imports.commit((request.params as any).importId, request.user!.uid),
+    (request) => opts.imports.commit(importId(request), request.user!.uid, tenant(request)),
   );
 }

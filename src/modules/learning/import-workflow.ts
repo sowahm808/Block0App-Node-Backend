@@ -15,68 +15,106 @@ import {
 
 export const IMPORT_COLLECTION = 'learningPackImports';
 export type ImportStatus =
-  | 'uploaded'
-  | 'extracting'
-  | 'extracted'
-  | 'mapping'
-  | 'needs_review'
-  | 'validated'
-  | 'importing'
-  | 'completed'
-  | 'failed';
+  'uploaded' | 'extracted' | 'needs_review' | 'validated' | 'committing' | 'completed' | 'failed';
+export type ValidationIssue = { path: string; message: string };
 export type ImportRecord = Record<string, any> & {
   importId: string;
   status: ImportStatus;
+  valid: boolean;
+  contentVersion: string;
   sourceFileName: string;
   draft?: LearningPackImportPayload;
-  validationErrors: string[];
+  validationErrors: ValidationIssue[];
+};
+
+const issue = (message: string): ValidationIssue => {
+  const path = message.match(/^(learningPack(?:\.[\w]+)?)/)?.[1] ?? '';
+  return { path, message };
+};
+const normalized = (record: ImportRecord): ImportRecord => {
+  const validationErrors = Array.isArray(record.validationErrors) ? record.validationErrors : [];
+  const errors = validationErrors.map((value) =>
+    typeof value === 'string' ? issue(value) : value,
+  );
+  const valid = record.status === 'validated' && errors.length === 0 && record.valid !== false;
+  return {
+    ...record,
+    valid,
+    validationErrors: errors,
+    validationCount: errors.length,
+    extractionWarnings: record.extractionWarnings ?? [],
+    created: record.importSummary?.created ?? record.created ?? 0,
+    updated: record.importSummary?.updated ?? record.updated ?? 0,
+    skipped: record.importSummary?.skipped ?? record.skipped ?? 0,
+    failed: record.importSummary?.failed ?? record.failed ?? 0,
+    contentVersion: String(record.contentVersion ?? '1'),
+    uploadedAt: record.uploadedAt ?? record.uploadedAtUtc,
+    packTitle: record.draft?.learningPack?.title ?? record.packTitle ?? '',
+  };
 };
 
 export class LearningPackImportRepository {
   constructor(private db: Firestore) {}
   async create(record: ImportRecord) {
     await this.db.collection(IMPORT_COLLECTION).doc(record.importId).set(record);
-    return record;
+    return normalized(record);
   }
-  async get(importId: string) {
+  async get(importId: string, tenantId?: string) {
     const snapshot = await this.db.collection(IMPORT_COLLECTION).doc(importId).get();
-    return snapshot.exists ? ({ importId: snapshot.id, ...snapshot.data() } as ImportRecord) : null;
+    if (!snapshot.exists) return null;
+    const record = { importId: snapshot.id, ...snapshot.data() } as ImportRecord;
+    return tenantId && record.tenantId !== tenantId ? null : normalized(record);
   }
   async update(importId: string, changes: Record<string, unknown>) {
     await this.db.collection(IMPORT_COLLECTION).doc(importId).set(changes, { merge: true });
     return this.get(importId);
   }
-  async list(query: Record<string, any>) {
+  async transition(
+    importId: string,
+    allowed: ImportStatus[],
+    changes: Record<string, unknown>,
+    tenantId?: string,
+  ) {
+    const ref = this.db.collection(IMPORT_COLLECTION).doc(importId);
+    return this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      const record = snapshot.exists
+        ? ({ importId: snapshot.id, ...snapshot.data() } as ImportRecord)
+        : null;
+      if (!record || (tenantId && record.tenantId !== tenantId))
+        throw new NotFoundError('Learning-pack import not found');
+      if (!allowed.includes(record.status))
+        throw new ConflictError(`Import cannot be changed while ${record.status}`);
+      transaction.set(ref, changes, { merge: true });
+      return normalized({ ...record, ...changes } as ImportRecord);
+    });
+  }
+  async list(query: Record<string, any>, tenantId?: string) {
     const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
     const snapshot = await this.db.collection(IMPORT_COLLECTION).get();
-    let records = snapshot.docs.map((doc) => ({ importId: doc.id, ...doc.data() }) as ImportRecord);
-    if (query.status) records = records.filter((item) => item.status === query.status);
-    if (query.uploadedBy) records = records.filter((item) => item.uploadedBy === query.uploadedBy);
-    if (query.search)
-      records = records.filter((item) =>
-        `${item.sourceFileName} ${item.draft?.learningPack?.title ?? ''}`
-          .toLowerCase()
-          .includes(String(query.search).toLowerCase()),
-      );
-    records.sort((a, b) => String(b.uploadedAtUtc).localeCompare(String(a.uploadedAtUtc)));
-    const offset = query.cursor
-      ? Math.max(0, records.findIndex((item) => item.importId === query.cursor) + 1)
-      : 0;
-    const page = records.slice(offset, offset + limit);
+    let records = snapshot.docs.map((doc) =>
+      normalized({ importId: doc.id, ...doc.data() } as ImportRecord),
+    );
+    if (tenantId) records = records.filter((item) => item.tenantId === tenantId);
+    records.sort((a, b) =>
+      `${b.uploadedAtUtc}|${b.importId}`.localeCompare(`${a.uploadedAtUtc}|${a.importId}`),
+    );
+    let offset = 0;
+    if (query.cursor) {
+      const index = records.findIndex((item) => item.importId === query.cursor);
+      if (index < 0)
+        throw new AppError(
+          400,
+          'Invalid cursor',
+          'The pagination cursor is invalid',
+          'invalid_cursor',
+        );
+      offset = index + 1;
+    }
+    const items = records.slice(offset, offset + limit);
     return {
-      data: page.map((item) => ({
-        importId: item.importId,
-        sourceFileName: item.sourceFileName,
-        status: item.status,
-        packTitle: item.draft?.learningPack?.title ?? null,
-        uploadedBy: item.uploadedBy,
-        uploadedAtUtc: item.uploadedAtUtc,
-        validationErrorCount: item.validationErrors?.length ?? 0,
-        created: item.importSummary?.created ?? 0,
-        updated: item.importSummary?.updated ?? 0,
-        failed: item.importSummary?.failed ?? 0,
-      })),
-      nextCursor: records[offset + limit]?.importId ?? null,
+      items,
+      nextCursor: offset + limit < records.length ? (items.at(-1)?.importId ?? null) : null,
     };
   }
 }
@@ -95,10 +133,10 @@ export class LearningPackImportService {
     private bucketName?: string,
     private extraction = new DocumentExtractionService(),
   ) {}
-  async upload(file: UploadedFile, userId: string, traceId: string) {
-    const importId = crypto.randomUUID(),
+  async upload(file: UploadedFile, userId: string, traceId: string, tenantId?: string) {
+    const importId = `imp_${crypto.randomUUID().replaceAll('-', '')}`,
       now = new Date().toISOString();
-    const storagePath = `learning-pack-imports/${importId}/${file.filename}`;
+    const storagePath = `learning-pack-imports/${importId}/${crypto.randomUUID()}`;
     if (!this.storage || !this.bucketName)
       throw new AppError(
         500,
@@ -116,26 +154,28 @@ export class LearningPackImportService {
       });
     await this.records.create({
       importId,
-      status: 'extracting',
+      status: 'uploaded',
+      valid: false,
+      contentVersion: '1',
       sourceFileName: file.filename,
       sourceMimeType: file.mimeType,
       sourceFileSize: file.buffer.length,
       sourceStoragePath: storagePath,
       validationErrors: [],
+      extractionWarnings: [],
       uploadedBy: userId,
+      uploadedAt: now,
       uploadedAtUtc: now,
       updatedBy: userId,
       updatedAtUtc: now,
+      tenantId,
       traceId,
     });
-    const started = Date.now();
     try {
       const extracted = await this.extraction.extract(file);
       const parsed = parseLearningPackDocument(extracted.text, file.filename);
-      const validationErrors = validateLearningPackImport(parsed.draft);
-      const status = validationErrors.length ? 'needs_review' : 'validated';
+      const warnings = [...extracted.warnings, ...parsed.warnings];
       const extractedText = extracted.text.length <= 300_000 ? extracted.text : undefined;
-      const extractedTextPreview = extracted.text.slice(0, 10_000);
       const extractedTextStoragePath =
         extractedText === undefined ? `${storagePath}.txt` : undefined;
       if (extractedTextStoragePath)
@@ -143,66 +183,73 @@ export class LearningPackImportService {
           .bucket(this.bucketName)
           .file(extractedTextStoragePath)
           .save(extracted.text, { contentType: 'text/plain', resumable: false });
-      await this.records.update(importId, {
-        status,
+      const updated = await this.records.update(importId, {
+        status: 'extracted',
+        valid: false,
         draft: parsed.draft,
-        validationErrors,
-        extractionWarnings: [...extracted.warnings, ...parsed.warnings],
-        extractionMetadata: { ...extracted.metadata, durationMs: Date.now() - started },
-        extractedTextPreview,
-        ...(extractedText === undefined
-          ? { extractedTextStoragePath }
-          : { extractedText }),
+        validationErrors: [],
+        extractionWarnings: warnings,
+        extractionMetadata: extracted.metadata,
+        extractedTextPreview: extracted.text.slice(0, 10_000),
+        ...(extractedText === undefined ? { extractedTextStoragePath } : { extractedText }),
         updatedAtUtc: new Date().toISOString(),
       });
-      return {
-        importId,
-        status,
-        draft: parsed.draft,
-        extractionWarnings: [...extracted.warnings, ...parsed.warnings],
-        validationErrors,
-        metadata: extracted.metadata,
-      };
-    } catch (error) {
-      const failureReason = error instanceof Error ? error.message : 'Document extraction failed';
+      return updated!;
+    } catch {
       await this.records.update(importId, {
         status: 'failed',
-        failureReason,
+        valid: false,
         updatedAtUtc: new Date().toISOString(),
       });
       throw new AppError(
         500,
         'Document extraction failed',
-        failureReason,
+        'The document could not be extracted safely',
         'document_extraction_failed',
       );
     }
   }
-  async get(importId: string) {
-    const record = await this.records.get(importId);
+  async get(importId: string, tenantId?: string) {
+    const record = await this.records.get(importId, tenantId);
     if (!record) throw new NotFoundError('Learning-pack import not found');
     return record;
   }
-  list(query: Record<string, any>) {
-    return this.records.list(query);
+  list(query: Record<string, any>, tenantId?: string) {
+    return this.records.list(query, tenantId);
   }
-  async saveDraft(importId: string, payload: LearningPackImportPayload, userId: string) {
-    const record = await this.get(importId);
-    if (record.status === 'completed')
-      throw new ConflictError('Completed imports cannot be revised');
-    const draft = { ...payload, sourceFileName: record.sourceFileName };
-    const validationErrors = validateLearningPackImport(draft);
-    const status = validationErrors.length ? 'needs_review' : 'validated';
-    return this.records.update(importId, {
-      draft,
-      validationErrors,
-      status,
-      updatedBy: userId,
-      updatedAtUtc: new Date().toISOString(),
-    });
+  async saveDraft(
+    importId: string,
+    payload: LearningPackImportPayload,
+    userId: string,
+    tenantId?: string,
+  ) {
+    const record = await this.get(importId, tenantId);
+    if (!payload?.learningPack || !Array.isArray(payload.capsules))
+      throw new AppError(
+        422,
+        'Invalid draft',
+        'Draft must contain learningPack and capsules',
+        'invalid_draft',
+      );
+    return this.records.transition(
+      importId,
+      ['uploaded', 'extracted', 'needs_review', 'validated', 'failed'],
+      {
+        draft: { ...payload, sourceFileName: record.sourceFileName },
+        contentVersion: String(Number(record.contentVersion) + 1),
+        validatedVersion: null,
+        validationErrors: [],
+        validationCount: 0,
+        valid: false,
+        status: 'needs_review',
+        updatedBy: userId,
+        updatedAtUtc: new Date().toISOString(),
+      },
+      tenantId,
+    );
   }
-  async validate(importId: string, userId: string) {
-    const record = await this.get(importId);
+  async validate(importId: string, userId: string, tenantId?: string) {
+    const record = await this.get(importId, tenantId);
     if (!record.draft)
       throw new AppError(
         422,
@@ -210,55 +257,78 @@ export class LearningPackImportService {
         'Import has no editable draft',
         'validation_failed',
       );
-    const errors = validateLearningPackImport(record.draft);
-    const status = errors.length ? 'needs_review' : 'validated';
-    await this.records.update(importId, {
-      validationErrors: errors,
-      status,
-      updatedBy: userId,
-      updatedAtUtc: new Date().toISOString(),
-    });
-    return {
-      valid: errors.length === 0,
-      status,
-      errors,
-      warnings: record.extractionWarnings ?? [],
-    };
+    const errors = validateLearningPackImport(record.draft).map(issue),
+      valid = errors.length === 0;
+    return this.records.transition(
+      importId,
+      ['extracted', 'needs_review', 'validated'],
+      {
+        validationErrors: errors,
+        validationCount: errors.length,
+        valid,
+        status: valid ? 'validated' : 'needs_review',
+        validatedVersion: valid ? record.contentVersion : null,
+        updatedBy: userId,
+        updatedAtUtc: new Date().toISOString(),
+      },
+      tenantId,
+    );
   }
-  async commit(importId: string, userId: string) {
-    const record = await this.get(importId);
-    if (record.status === 'completed' && record.importSummary)
-      return record.importSummary as ImportSummary;
-    if (record.status !== 'validated' || !record.draft)
-      throw new ConflictError('Import must be validated before commit');
-    const errors = validateLearningPackImport(record.draft);
-    if (errors.length) {
-      await this.records.update(importId, { status: 'needs_review', validationErrors: errors });
+  async commit(importId: string, userId: string, tenantId?: string) {
+    const existing = await this.get(importId, tenantId);
+    if (existing.status === 'completed' && existing.commitResult) return existing.commitResult;
+    if (
+      !existing.draft ||
+      !existing.valid ||
+      existing.validationErrors.length ||
+      existing.validatedVersion !== existing.contentVersion
+    )
+      throw new ConflictError('The current draft must be validated before commit');
+    const locked = await this.records.transition(
+      importId,
+      ['validated'],
+      { status: 'committing', updatedBy: userId, updatedAtUtc: new Date().toISOString() },
+      tenantId,
+    );
+    const draft = {
+      ...locked.draft!,
+      learningPack: { ...locked.draft!.learningPack, status: 'draft', importId },
+    };
+    try {
+      const summary = await this.learning.importLearningPack(draft, userId, importId);
+      if (summary.failed) throw new Error('Persistence reported failed records');
+      const importedAt = new Date().toISOString();
+      const result = {
+        created: summary.created,
+        updated: summary.updated,
+        skipped: summary.skipped,
+        failed: 0,
+        validationErrors: [],
+        contentIds: summary.contentIds,
+        importedBy: userId,
+        importedAt,
+        sourceFileName: existing.sourceFileName,
+      };
+      await this.records.update(importId, {
+        status: 'completed',
+        commitResult: result,
+        importSummary: summary,
+        committedAtUtc: importedAt,
+        updatedAtUtc: importedAt,
+      });
+      return result;
+    } catch {
+      await this.records.update(importId, {
+        status: 'failed',
+        valid: false,
+        updatedAtUtc: new Date().toISOString(),
+      });
       throw new AppError(
-        422,
-        'Validation failed',
-        'Import contains blocking validation errors',
-        'validation_failed',
-        errors,
+        500,
+        'Import commit failed',
+        'No content was committed',
+        'import_commit_failed',
       );
     }
-    await this.records.update(importId, {
-      status: 'importing',
-      updatedBy: userId,
-      updatedAtUtc: new Date().toISOString(),
-    });
-    const draft: LearningPackImportPayload = {
-      ...record.draft,
-      learningPack: { ...record.draft.learningPack, status: 'draft', importId },
-    };
-    const summary = await this.learning.importLearningPack(draft, userId, importId);
-    await this.records.update(importId, {
-      status: summary.failed ? 'failed' : 'completed',
-      importSummary: summary,
-      resultLearningPackId: draft.learningPack.externalId,
-      committedAtUtc: new Date().toISOString(),
-      updatedAtUtc: new Date().toISOString(),
-    });
-    return summary;
   }
 }
