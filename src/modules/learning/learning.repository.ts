@@ -2744,7 +2744,51 @@ export class LearningRepository {
       status: String(review.status),
       title: String(entity.title ?? entity.stem ?? review.entityId),
       content,
+      notes: typeof review.notes === 'string' ? review.notes : '',
+      reviewerId: typeof review.reviewerId === 'string' ? review.reviewerId : null,
+      reviewedAtUtc: typeof review.reviewedAtUtc === 'string' ? review.reviewedAtUtc : null,
+      version: Number(review.version ?? 0),
     };
+  }
+
+  /** Atomically records a review decision without modifying the reviewed entity. */
+  async decideContentReview(
+    reviewId: string,
+    decision: 'approved' | 'changes_requested' | 'rejected',
+    notes: string,
+    reviewerId: string,
+    expectedVersion?: number,
+  ) {
+    const reference = this.db.collection('contentReviews').doc(reviewId);
+    const result = await this.db.runTransaction(async (transaction) => {
+      const document = await transaction.get(reference);
+      if (!document.exists) return { outcome: 'not_found' as const };
+
+      const current = document.data()!;
+      if (current.status === 'approved' || current.status === 'rejected') {
+        return { outcome: 'invalid_transition' as const };
+      }
+      const version = Number(current.version ?? 0);
+      if (expectedVersion !== undefined && version !== expectedVersion) {
+        return { outcome: 'conflict' as const };
+      }
+
+      const updated = {
+        ...current,
+        id: String(current.id ?? reviewId),
+        status: decision,
+        notes,
+        reviewerId,
+        reviewedAtUtc: new Date().toISOString(),
+        version: version + 1,
+      };
+      transaction.set(reference, updated);
+      return { outcome: 'updated' as const, review: updated };
+    });
+    if (result.outcome !== 'updated') return result;
+
+    // Use the same allow-listed DTO mapper as the detail endpoint.
+    return { outcome: 'updated' as const, review: await this.findContentReviewById(reviewId) };
   }
 
   async listReviewScenarios() {
