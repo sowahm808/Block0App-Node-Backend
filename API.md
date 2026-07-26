@@ -19,6 +19,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 - `GET /api/v1/dashboard` requires authenticated `scholar:access` and returns the current scholar challenge dashboard with `enrollmentState` values for `active`, `not_enrolled`, `not_started`, and `completed`. Compatibility aliases `/api/v1/mentor/dashboard`, `/api/v1/review/dashboard`, and `/api/v1/admin/dashboard` continue to return the seeded dashboard summary for legacy screens.
 - `GET /api/v1/admin/system-settings` returns frontend-safe system settings and feature flags for admin screens.
 - `GET /api/v1/review/content` returns content-review queue items enriched with their associated content metadata.
+- `GET /api/v1/review/content/:reviewId` requires `content.review` and returns one approved content-review DTO selected by its opaque review document ID. Missing documents use `application/problem+json`; the ID is never treated as an entity ID.
 - `GET /api/v1/review/questions` returns reviewable questions enriched with review status and explanation metadata. Compatibility aliases include `/api/review/questions` and `/review/questions`.
 - `GET /api/v1/readiness` returns a seeded readiness summary.
 - `GET /api/v1/readiness/prompts` returns seeded daily readiness prompts.
