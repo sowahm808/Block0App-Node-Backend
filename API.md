@@ -64,4 +64,4 @@ API requests from restricted accounts return `423 Locked` with the account-disab
 
 Authenticated endpoints accept backend access tokens or Firebase ID tokens in the standard `Authorization: Bearer <token>` header. For browser clients and compatibility routes, the same shared authentication middleware also accepts lowercase bearer schemes, `x-access-token`, `x-firebase-token`, or token cookies named `accessToken`, `access_token`, `idToken`, or `id_token`.
 
-Errors use RFC 7807-style `application/problem+json` with `type`, `title`, `status`, `detail`, `traceId`, and optional validation `errors`.
+Errors use RFC 7807-style `application/problem+json` with stable `code`, `message`, `fieldErrors`, and `correlationId` fields alongside the compatibility fields `type`, `title`, `status`, `detail`, `traceId`, and optional validation `errors`. Every response includes the sanitized correlation identifier in `x-correlation-id`; unsafe client-supplied identifiers are replaced with a server-generated UUID.

@@ -6,7 +6,7 @@ import swaggerUi from '@fastify/swagger-ui';
 import { env } from './config/env.js';
 import { initializeFirebase } from './config/firebase.js';
 import { loggerOptions } from './modules/common/logger.js';
-import { errorHandler } from './modules/common/problem-details.js';
+import { errorHandler, sanitizedCorrelationId } from './modules/common/problem-details.js';
 import { registerSecurity } from './modules/common/security-headers.js';
 import { registerRateLimit } from './modules/common/rate-limit.js';
 import { UsersRepository } from './modules/users/users.repository.js';
@@ -38,9 +38,13 @@ export async function buildApp(overrides?: any) {
       ignoreDuplicateSlashes: true,
     },
     logger: loggerOptions,
-    genReqId: (req) => String(req.headers['x-correlation-id'] ?? crypto.randomUUID()),
+    genReqId: (req) =>
+      sanitizedCorrelationId(req.headers['x-correlation-id'], () => crypto.randomUUID()),
   });
   app.setErrorHandler(errorHandler);
+  app.addHook('onSend', async (request, reply) => {
+    if (!reply.hasHeader('x-correlation-id')) reply.header('x-correlation-id', request.id);
+  });
   await registerSecurity(app);
   await app.register(cors, {
     origin: (origin, cb) => cb(null, !origin || env.corsOrigins.includes(origin)),
