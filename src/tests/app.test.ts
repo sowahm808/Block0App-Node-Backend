@@ -168,7 +168,43 @@ describe('MindUnlocking API', () => {
       payload: { email: 'bad' },
     });
     expect(r.statusCode).toBe(400);
-    expect(r.json()).toMatchObject({ title: 'Validation Failed', status: 400 });
+    expect(r.json()).toMatchObject({
+      code: 'validation_failed',
+      title: 'Validation Failed',
+      status: 400,
+      fieldErrors: expect.any(Object),
+      correlationId: expect.any(String),
+    });
+    expect(r.headers['x-correlation-id']).toBe(r.json().correlationId);
+  });
+
+  it('echoes only sanitized correlation identifiers on success and errors', async () => {
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      readiness: {
+        ready: async () => ({ status: 'ready' }),
+        current: (u: string) => ({ userId: u }),
+      },
+    });
+
+    const accepted = await app.inject({
+      method: 'GET',
+      url: '/api/v1/health',
+      headers: { 'x-correlation-id': 'web-01:request_42' },
+    });
+    expect(accepted.headers['x-correlation-id']).toBe('web-01:request_42');
+
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      headers: { 'x-correlation-id': 'unsafe value\nfor-log-forging' },
+      payload: { email: 'bad' },
+    });
+    expect(rejected.headers['x-correlation-id']).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(rejected.json().correlationId).toBe(rejected.headers['x-correlation-id']);
   });
   it('accepts the complete registration onboarding payload', async () => {
     const app = await buildApp({
