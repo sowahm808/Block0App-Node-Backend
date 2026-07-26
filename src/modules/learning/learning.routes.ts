@@ -6,6 +6,7 @@ import {
   ForbiddenError,
   ValidationAppError,
   ConflictError,
+  UnprocessableEntityError,
 } from '../common/errors.js';
 import { authenticate } from '../common/auth-middleware.js';
 import type { AuthService } from '../auth/auth.service.js';
@@ -789,6 +790,74 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
       return { data: review };
     },
   );
+
+  const reviewDecisionBodySchema = z.object({ notes: z.string().optional().default('') }).strict();
+  const opaqueReviewIdSchema = z.object({
+    reviewId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/),
+  });
+  const decisionRoutes = [
+    { path: 'approve', status: 'approved', notesRequired: false },
+    { path: 'request-changes', status: 'changes_requested', notesRequired: true },
+    { path: 'reject', status: 'rejected', notesRequired: true },
+  ] as const;
+
+  for (const decision of decisionRoutes) {
+    app.post(
+      `/review/content/:reviewId/${decision.path}`,
+      {
+        preValidation: async (request) => {
+          const body = request.body as Record<string, unknown> | null;
+          if (body?.notes !== undefined && typeof body.notes !== 'string') {
+            throw new ValidationAppError({ notes: ['Reviewer notes must be a string.'] });
+          }
+        },
+        preHandler: requireAdminPermission('content.review'),
+        schema: {
+          params: zodToJsonSchema(opaqueReviewIdSchema),
+          body: zodToJsonSchema(reviewDecisionBodySchema),
+          tags: ['review'],
+          security: [{ bearerAuth: [] }],
+          description: `Set a content review status to ${decision.status}.`,
+        },
+      },
+      async (request) => {
+        const { reviewId } = request.params as { reviewId: string };
+        const { notes: suppliedNotes } = reviewDecisionBodySchema.parse(request.body);
+        const notes = suppliedNotes.trim();
+        if (decision.notesRequired && !notes) {
+          throw new UnprocessableEntityError(
+            `Reviewer notes are required when setting status to ${decision.status}.`,
+          );
+        }
+
+        const ifMatch = request.headers['if-match'];
+        let expectedVersion: number | undefined;
+        if (ifMatch !== undefined) {
+          const normalized = String(ifMatch).trim().replace(/^W\//, '').replace(/^"|"$/g, '');
+          if (!/^\d+$/.test(normalized)) {
+            throw new ValidationAppError({ ifMatch: ['If-Match must contain a numeric version.'] });
+          }
+          expectedVersion = Number(normalized);
+        }
+
+        const result = await (learning as any).decideContentReview(
+          reviewId,
+          decision.status,
+          notes,
+          request.user!.uid,
+          expectedVersion,
+        );
+        if (result.outcome === 'not_found') throw new ContentReviewNotFoundError();
+        if (result.outcome === 'conflict') {
+          throw new ConflictError('The content review was updated by another reviewer.');
+        }
+        if (result.outcome === 'invalid_transition') {
+          throw new UnprocessableEntityError('The content review status transition is invalid.');
+        }
+        return { data: result.review };
+      },
+    );
+  }
 
   app.get('/review/questions', async () => ({ data: await learning.listReviewQuestions() }));
 

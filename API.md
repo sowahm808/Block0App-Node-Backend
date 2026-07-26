@@ -20,6 +20,7 @@ Canonical routes are under `/api/v1`; compatibility aliases are under `/api`. Pu
 - `GET /api/v1/admin/system-settings` returns frontend-safe system settings and feature flags for admin screens.
 - `GET /api/v1/review/content` returns content-review queue items enriched with their associated content metadata.
 - `GET /api/v1/review/content/:reviewId` requires `content.review` and returns one approved content-review DTO selected by its opaque review document ID. Missing documents use `application/problem+json`; the ID is never treated as an entity ID.
+- `POST /api/v1/review/content/:reviewId/approve`, `/request-changes`, and `/reject` require `content.review` and atomically record reviewer decisions. The JSON body accepts `notes`; notes are required for request-changes and rejection. Optional numeric `If-Match` supplies the expected version, with stale decisions returning `409`. Final approved and rejected reviews cannot transition again.
 - `GET /api/v1/review/questions` returns reviewable questions enriched with review status and explanation metadata. Compatibility aliases include `/api/review/questions` and `/review/questions`.
 - `GET /api/v1/readiness` returns a seeded readiness summary.
 - `GET /api/v1/readiness/prompts` returns seeded daily readiness prompts.
