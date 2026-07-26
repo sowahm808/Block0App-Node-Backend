@@ -784,6 +784,86 @@ describe('MindUnlocking API', () => {
     }
   });
 
+  it('gets a single content review by document ID with review authorization', async () => {
+    const findCalls: string[] = [];
+    let healthDelegations = 0;
+    const review = {
+      id: 'review-LP01-C01-Q01',
+      entityType: 'question',
+      entityId: 'LP01-C01-Q01',
+      status: 'draft',
+      title: 'In the medical term cardiology...',
+      content: {
+        stem: 'In the medical term cardiology...',
+        choices: [{ id: 'A', label: 'A', text: 'cardi' }],
+        explanation: {
+          correctChoiceId: 'a',
+          correctRationale: 'The root cardi means heart.',
+        },
+      },
+    };
+    const app = await buildApp({
+      authService: svc,
+      sessions,
+      learning: {
+        findContentReviewById: async (reviewId: string) => {
+          findCalls.push(reviewId);
+          return reviewId === review.id ? review : null;
+        },
+        health: async () => {
+          healthDelegations += 1;
+        },
+      },
+      readiness: { ready: async () => ({ status: 'ready' }) },
+    });
+    const reviewer = await svc.signAccessToken('reviewer', 'reviewer@example.com', [
+      'content.review',
+    ]);
+
+    const success = await app.inject({
+      url: `/api/v1/review/content/${review.id}`,
+      headers: { authorization: `Bearer ${reviewer.token}` },
+    });
+    expect(success.statusCode).toBe(200);
+    expect(success.json()).toEqual({ data: review });
+    expect(success.json().data.content.choices[0].id).toBe('A');
+    expect(success.json().data.content.explanation.correctChoiceId).toBe('a');
+    expect(findCalls).toEqual([review.id]);
+    expect(healthDelegations).toBe(0);
+
+    const missing = await app.inject({
+      url: '/api/v1/review/content/review-missing',
+      headers: { authorization: `Bearer ${reviewer.token}` },
+    });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.headers['content-type']).toContain('application/problem+json');
+    expect(missing.json()).toMatchObject({
+      title: 'Content review not found',
+      status: 404,
+      detail: 'No content review exists for the supplied review ID.',
+      instance: '/api/v1/review/content/review-missing',
+    });
+
+    const unauthenticated = await app.inject(`/api/v1/review/content/${review.id}`);
+    expect(unauthenticated.statusCode).toBe(401);
+    const scholar = await svc.signAccessToken('scholar', 'scholar@example.com', ['scholar:access']);
+    const unauthorized = await app.inject({
+      url: `/api/v1/review/content/${review.id}`,
+      headers: { authorization: `Bearer ${scholar.token}` },
+    });
+    expect(unauthorized.statusCode).toBe(403);
+
+    for (const invalidId of ['%2E%2E%2Fhealth', 'review%20id', `${'a'.repeat(201)}`]) {
+      const invalid = await app.inject({
+        url: `/api/v1/review/content/${invalidId}`,
+        headers: { authorization: `Bearer ${reviewer.token}` },
+      });
+      expect([400, 404, 414]).toContain(invalid.statusCode);
+    }
+    expect(findCalls).toEqual([review.id, 'review-missing']);
+    expect(healthDelegations).toBe(0);
+  });
+
   it('keeps W1 resume payloads separate from W2/W3 submit feedback', async () => {
     const app = await buildApp({
       authService: svc,

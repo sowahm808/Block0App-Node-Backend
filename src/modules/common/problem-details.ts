@@ -32,7 +32,9 @@ export function problemDetails(error: Error, request: FastifyRequest) {
   const type =
     app?.code === 'account_disabled'
       ? 'https://api.blockzero.example/problems/account-disabled'
-      : `https://httpstatuses.com/${status}`;
+      : app?.code === 'content_review_not_found'
+        ? 'https://api.blockzero.example/problems/content-review-not-found'
+        : `https://httpstatuses.com/${status}`;
   const fieldErrors = app?.errors ?? validationErrors ?? {};
   return {
     code: app?.code ?? (isValidation ? 'validation_failed' : `http_${status}`),
@@ -48,6 +50,7 @@ export function problemDetails(error: Error, request: FastifyRequest) {
     traceId: request.id,
     correlationId: request.id,
     fieldErrors,
+    ...(status === 404 ? { instance: request.url } : {}),
     ...(app?.errors ? { errors: app.errors, validationErrors: app.errors } : {}),
     ...(validationErrors ? { errors: validationErrors, validationErrors } : {}),
   };

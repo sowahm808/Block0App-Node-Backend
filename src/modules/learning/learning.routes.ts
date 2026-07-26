@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
   NotFoundError,
+  ContentReviewNotFoundError,
   ForbiddenError,
   ValidationAppError,
   ConflictError,
@@ -760,6 +761,34 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   }));
 
   app.get('/review/content', async () => ({ data: await learning.listReviewContent() }));
+
+  app.get(
+    '/review/content/:reviewId',
+    {
+      preHandler: requireAdminPermission('content.review'),
+      schema: {
+        params: zodToJsonSchema(
+          z.object({ reviewId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/) }),
+        ),
+        response: {
+          200: {
+            type: 'object',
+            properties: { data: { type: 'object', additionalProperties: true } },
+            required: ['data'],
+          },
+        },
+        tags: ['review'],
+        security: [{ bearerAuth: [] }],
+        description: 'Get one content-review document by its opaque review document ID.',
+      },
+    },
+    async (request) => {
+      const { reviewId } = request.params as { reviewId: string };
+      const review = await (learning as any).findContentReviewById(reviewId);
+      if (!review) throw new ContentReviewNotFoundError();
+      return { data: review };
+    },
+  );
 
   app.get('/review/questions', async () => ({ data: await learning.listReviewQuestions() }));
 

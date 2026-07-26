@@ -36,6 +36,11 @@ export class NotFoundError extends AppError {
     super(404, 'Not Found', message, 'not_found');
   }
 }
+export class ContentReviewNotFoundError extends AppError {
+  constructor(message = 'No content review exists for the supplied review ID.') {
+    super(404, 'Content review not found', message, 'content_review_not_found');
+  }
+}
 export class ValidationAppError extends AppError {
   constructor(errors: unknown) {
     super(400, 'Validation Failed', 'Request validation failed', 'validation_failed', errors);

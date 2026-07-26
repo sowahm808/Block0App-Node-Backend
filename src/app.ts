@@ -287,6 +287,27 @@ export async function buildApp(overrides?: any) {
               };
             });
           },
+          findContentReviewById: async (reviewId: string) => {
+            const seed = await import('./modules/learning/learning.seed.js');
+            const review = seed.sampleContentReviews.find((item) => item.id === reviewId);
+            if (!review) return null;
+            const sources = [
+              ...seed.sampleLearningPacks,
+              ...seed.sampleCapsules,
+              ...seed.sampleQuestions,
+            ];
+            const content: any = sources.find((item) => item.id === review.entityId);
+            return content
+              ? {
+                  id: review.id,
+                  entityType: review.entityType,
+                  entityId: review.entityId,
+                  status: review.status,
+                  title: 'title' in content ? content.title : content.stem,
+                  content,
+                }
+              : null;
+          },
           listReviewQuestions: async () => {
             const seed = await import('./modules/learning/learning.seed.js');
             return seed.sampleQuestions.map((question) => ({

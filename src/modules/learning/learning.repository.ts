@@ -2709,6 +2709,44 @@ export class LearningRepository {
     );
   }
 
+  /** Fetches by the review document key, never by the reviewed entity's ID. */
+  async findContentReviewById(reviewId: string) {
+    const document = await this.db.collection('contentReviews').doc(reviewId).get();
+    const review = document.exists ? document.data() : null;
+    if (!review) return null;
+
+    const entity = await this.getReviewEntity(String(review.entityType), String(review.entityId));
+    if (!entity) return null;
+    const content: Record<string, unknown> = {};
+    for (const field of ['id', 'title', 'description', 'stem', 'choices', 'objectives', 'tags']) {
+      if (entity[field] !== undefined) content[field] = entity[field];
+    }
+    if (review.entityType === 'question') {
+      const explanation = await this.getByField(
+        'questionExplanations',
+        'questionId',
+        String(review.entityId),
+        sampleQuestionExplanations,
+      );
+      const source = explanation ?? entity.explanation;
+      if (source) {
+        content.explanation = Object.fromEntries(
+          ['correctChoiceId', 'correctRationale', 'memoryTip', 'reference']
+            .filter((field) => source[field] !== undefined)
+            .map((field) => [field, source[field]]),
+        );
+      }
+    }
+    return {
+      id: String(review.id ?? reviewId),
+      entityType: String(review.entityType),
+      entityId: String(review.entityId),
+      status: String(review.status),
+      title: String(entity.title ?? entity.stem ?? review.entityId),
+      content,
+    };
+  }
+
   async listReviewScenarios() {
     const snapshot = await this.db.collection('reviewScenarios').get();
     const scenarios = snapshot.docs.map((doc) => doc.data());
