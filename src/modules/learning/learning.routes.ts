@@ -19,6 +19,7 @@ import {
   eveningCheckInSchema,
   morningCheckInSchema,
 } from './check-ins.schemas.js';
+import { learningPackAssignmentSchema } from './learning-pack-assignments.schemas.js';
 
 type LearningRoutesOptions = {
   learning: LearningRepository;
@@ -922,6 +923,35 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     }),
   );
 
+  app.post(
+    '/admin/learning-packs/:learningPackId/assignments',
+    {
+      preHandler: authService ? requireAdminPermission('learning_packs.assign') : undefined,
+      schema: { body: zodToJsonSchema(learningPackAssignmentSchema) },
+    },
+    async (request, reply) => {
+      const { learningPackId } = request.params as { learningPackId: string };
+      const input = learningPackAssignmentSchema.parse(request.body);
+      if (input.learningPackId !== learningPackId) {
+        throw new ValidationAppError({
+          learningPackId: ['Body learningPackId must match the route parameter.'],
+        });
+      }
+      try {
+        const result = await (learning as any).assignLearningPack(input, request.user!.uid);
+        return reply.status(201).send({ data: result });
+      } catch (error) {
+        if ((error as Error).message === 'LEARNING_PACK_NOT_FOUND') {
+          throw new NotFoundError('Learning pack not found');
+        }
+        if ((error as Error).message === 'IDEMPOTENCY_KEY_REUSED') {
+          throw new ConflictError('Idempotency key was already used for a different request.');
+        }
+        throw error;
+      }
+    },
+  );
+
   app.get('/admin/content-review', async () => ({ data: await learning.listReviewContent() }));
 
   app.get('/admin/reports', async () => ({ data: await learning.getDashboard() }));
@@ -931,6 +961,35 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
   }));
 
   app.get('/admin/users', async () => ({ data: users?.list ? await users.list() : [] }));
+
+  app.get(
+    '/admin/scholars',
+    { preHandler: authService ? requireAdminPermission('users.read') : undefined },
+    async (request) => {
+      const query = request.query as { search?: string };
+      const search = String(query.search ?? '')
+        .trim()
+        .toLowerCase();
+      const allUsers = users?.list ? ((await users.list()) as any[]) : [];
+      const items = allUsers
+        .filter((user) => Array.isArray(user.roles) && user.roles.includes('Scholar'))
+        .filter(
+          (user) => !search || `${user.displayName} ${user.email}`.toLowerCase().includes(search),
+        )
+        .slice(0, 100)
+        .map((user) => ({
+          id: user.uid,
+          displayName: user.displayName,
+          email: user.email,
+          status: user.status,
+          cohortId: user.activeCohortId ?? undefined,
+          cohortName: user.activeCohortName ?? undefined,
+          teamId: user.teamId ?? undefined,
+          teamName: user.teamName ?? undefined,
+        }));
+      return { items, total: items.length };
+    },
+  );
 
   app.get(
     '/admin/system-settings',

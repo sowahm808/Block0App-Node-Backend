@@ -54,6 +54,7 @@ export const rolePermissions: Record<AppRole, string[]> = {
     'content.review',
     'content.approve',
     'content.publish',
+    'learning_packs.assign',
     'reports.read',
     'readiness.manage',
     'rewards.manage',

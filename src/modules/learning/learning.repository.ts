@@ -38,6 +38,10 @@ import type {
   EveningCheckInInput,
   MorningCheckInInput,
 } from './check-ins.schemas.js';
+import type {
+  LearningPackAssignmentRequest,
+  LearningPackAssignmentResult,
+} from './learning-pack-assignments.schemas.js';
 
 const rewardTypeMap: Record<string, string> = {
   badge: 'digital_badge',
@@ -302,7 +306,129 @@ const removeUndefinedProperties = (value: unknown): unknown => {
 };
 
 export class LearningRepository {
-  constructor(private db: Firestore) {}
+  constructor(
+    private db: Firestore,
+    private usersCollectionName = 'users',
+  ) {}
+
+  async assignLearningPack(
+    input: LearningPackAssignmentRequest,
+    actorId: string,
+  ): Promise<LearningPackAssignmentResult> {
+    const requestHash = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
+    const idempotencyId = crypto
+      .createHash('sha256')
+      .update(`${actorId}:${input.idempotencyKey}`)
+      .digest('hex');
+    const idempotencyRef = this.db.collection('learningPackAssignmentRequests').doc(idempotencyId);
+
+    return this.db.runTransaction(async (transaction) => {
+      const priorRequest = await transaction.get(idempotencyRef);
+      if (priorRequest.exists) {
+        const prior = priorRequest.data() as any;
+        if (prior.requestHash !== requestHash) {
+          throw new Error('IDEMPOTENCY_KEY_REUSED');
+        }
+        return prior.result as LearningPackAssignmentResult;
+      }
+
+      const packRef = this.db.collection('learningPacks').doc(input.learningPackId);
+      const pack = await transaction.get(packRef);
+      if (!pack.exists) throw new Error('LEARNING_PACK_NOT_FOUND');
+
+      const userRefs = input.scholarIds.map((scholarId) =>
+        this.db.collection(this.usersCollectionName).doc(scholarId),
+      );
+      const userDocuments = await Promise.all(userRefs.map((ref) => transaction.get(ref)));
+      const assignmentRefs = input.scholarIds.map((scholarId) => {
+        const assignmentId = crypto
+          .createHash('sha256')
+          .update(`${input.learningPackId}:${scholarId}`)
+          .digest('hex');
+        return this.db.collection('assignments').doc(assignmentId);
+      });
+      const existingAssignments = await Promise.all(
+        assignmentRefs.map((ref) => transaction.get(ref)),
+      );
+      const now = new Date().toISOString();
+      const assignments: LearningPackAssignmentResult['assignments'] = [];
+      const errors: NonNullable<LearningPackAssignmentResult['errors']> = [];
+      let created = 0;
+      let skipped = 0;
+
+      for (let index = 0; index < input.scholarIds.length; index += 1) {
+        const scholarId = input.scholarIds[index];
+        const user = userDocuments[index];
+        const userData = user.data() as any;
+        if (
+          !user.exists ||
+          !Array.isArray(userData?.roles) ||
+          !userData.roles.includes('Scholar')
+        ) {
+          errors.push({ scholarId, message: 'Active scholar not found.' });
+          continue;
+        }
+        if (['Suspended', 'Disabled', 'Deleted'].includes(userData.status)) {
+          errors.push({ scholarId, message: 'Scholar is not active.' });
+          continue;
+        }
+
+        const assignmentRef = assignmentRefs[index];
+        const assignmentId = assignmentRef.id;
+        const existing = existingAssignments[index];
+        if (existing.exists) {
+          const existingData = existing.data() as any;
+          assignments.push({
+            id: assignmentId,
+            scholarId,
+            status: existingData.status ?? 'assigned',
+            createdAt: existingData.createdAtUtc,
+          });
+          skipped += 1;
+          continue;
+        }
+
+        const assignment = removeUndefinedProperties({
+          id: assignmentId,
+          learningPackId: input.learningPackId,
+          scholarId,
+          targetId: scholarId,
+          targetType: 'scholar',
+          cohortId: input.cohortId,
+          teamId: input.teamId,
+          startAtUtc: input.startAtUtc,
+          dueAtUtc: input.dueAtUtc,
+          notes: input.notes,
+          status: 'assigned',
+          assignedBy: actorId,
+          createdAtUtc: now,
+          updatedAtUtc: now,
+        });
+        transaction.create(assignmentRef, assignment as FirebaseFirestore.DocumentData);
+        assignments.push({ id: assignmentId, scholarId, status: 'assigned', createdAt: now });
+        created += 1;
+      }
+
+      const result: LearningPackAssignmentResult = {
+        learningPackId: input.learningPackId,
+        requested: input.scholarIds.length,
+        created,
+        skipped,
+        failed: errors.length,
+        assignments,
+        ...(errors.length ? { errors } : {}),
+      };
+      transaction.create(idempotencyRef, {
+        id: idempotencyId,
+        actorId,
+        idempotencyKey: input.idempotencyKey,
+        requestHash,
+        result,
+        createdAtUtc: now,
+      });
+      return result;
+    });
+  }
 
   async saveCheckIn(userId: string, input: CheckInInput) {
     const now = new Date().toISOString();
@@ -1404,6 +1530,11 @@ export class LearningRepository {
         packCapsuleIds.has(question.capsuleId),
       );
       const packQuestionIds = new Set(packQuestions.map((question: any) => question.id));
+      const assignmentCount = new Set(
+        assignments
+          .filter((assignment: any) => assignment.learningPackId === pack.id)
+          .map((assignment: any) => assignment.scholarId ?? assignment.targetId),
+      ).size;
       const scholarCapsuleAttempts = capsuleAttempts.filter(
         (attempt: any) =>
           (!scholarId || attempt.scholarId === scholarId) && packCapsuleIds.has(attempt.capsuleId),
@@ -1484,6 +1615,7 @@ export class LearningRepository {
         totalCapsules,
         completedCapsules,
         questionCount: totalQuestions,
+        assignmentCount,
         totalQuestions,
         completedQuestions,
         accuracyPermitted,
