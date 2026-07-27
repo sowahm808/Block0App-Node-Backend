@@ -46,6 +46,7 @@ export const rolePermissions: Record<AppRole, string[]> = {
     'dashboard.read',
     'users.read',
     'users.manage',
+    'admin.users.read',
     'challenges.manage',
     'cohorts.manage',
     'teams.manage',

@@ -602,13 +602,15 @@ describe('MindUnlocking API', () => {
       '/review/ai-drafts',
       '/review/history',
       '/admin/dashboard',
-      '/admin/users',
       '/readiness',
     ]) {
       const response = await app.inject(`/api/v1${path}`);
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const anonymousAdminUsers = await app.inject('/api/v1/admin/users');
+    expect(anonymousAdminUsers.statusCode).toBe(401);
 
     const anonymousAdminPacks = await app.inject('/api/v1/admin/learning-packs');
     expect(anonymousAdminPacks.statusCode).toBe(401);

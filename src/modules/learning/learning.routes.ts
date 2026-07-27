@@ -19,7 +19,10 @@ import {
   eveningCheckInSchema,
   morningCheckInSchema,
 } from './check-ins.schemas.js';
-import { learningPackAssignmentSchema } from './learning-pack-assignments.schemas.js';
+import {
+  bulkLearningPackAssignmentSchema,
+  learningPackAssignmentSchema,
+} from './learning-pack-assignments.schemas.js';
 
 type LearningRoutesOptions = {
   learning: LearningRepository;
@@ -921,22 +924,35 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get(
     '/admin/learning-packs',
-    { preHandler: authService ? async (request) => {
-      await requireAdministrator(request);
-      const permissions = request.user?.permissions ?? [];
-      if (!permissions.includes('*') && !permissions.includes('admin.learning-packs.read') &&
-          !permissions.includes('content.read')) throw new ForbiddenError('Missing permission: admin.learning-packs.read');
-    } : undefined },
+    {
+      preHandler: authService
+        ? async (request) => {
+            await requireAdministrator(request);
+            const permissions = request.user?.permissions ?? [];
+            if (
+              !permissions.includes('*') &&
+              !permissions.includes('admin.learning-packs.read') &&
+              !permissions.includes('content.read')
+            )
+              throw new ForbiddenError('Missing permission: admin.learning-packs.read');
+          }
+        : undefined,
+    },
     async (request) => {
       try {
-        if ('listAdminLearningPacks' in learning)
-          return await learning.listAdminLearningPacks(request.query as any);
+        if ('listAdminLearningPacks' in learning) {
+          const query = request.query as Record<string, unknown>;
+          return await learning.listAdminLearningPacks({
+            ...query,
+            publicationStatus: query.publicationStatus ?? query.status,
+          } as any);
+        }
         const items = await (learning as any).listLearningPacks(undefined, request.query as any, {
-          catalog: true, includeDrafts: true,
+          catalog: true,
+          includeDrafts: true,
         });
         return { items, total: items.length, nextCursor: null };
-      }
-      catch (error) {
+      } catch (error) {
         if ((error as Error).message === 'INVALID_CATALOG_CURSOR')
           throw new ValidationAppError({ cursor: ['Cursor is invalid or no longer available.'] });
         throw error;
@@ -944,19 +960,27 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     },
   );
 
-  app.get('/admin/learning-packs/:learningPackId', {
-    preHandler: authService ? requireLearningPackPermission('admin.learning-packs.read') : undefined,
-  }, async (request) => {
-    const { learningPackId } = request.params as { learningPackId: string };
-    const pack = await learning.getAdminLearningPack(learningPackId);
-    if (!pack) throw new NotFoundError('Learning pack not found');
-    return pack;
-  });
+  app.get(
+    '/admin/learning-packs/:learningPackId',
+    {
+      preHandler: authService
+        ? requireLearningPackPermission('admin.learning-packs.read')
+        : undefined,
+    },
+    async (request) => {
+      const { learningPackId } = request.params as { learningPackId: string };
+      const pack = await learning.getAdminLearningPack(learningPackId);
+      if (!pack) throw new NotFoundError('Learning pack not found');
+      return pack;
+    },
+  );
 
   app.post(
     '/admin/learning-packs/:learningPackId/assignments',
     {
-      preHandler: authService ? requireLearningPackPermission('admin.learning-packs.assign') : undefined,
+      preHandler: authService
+        ? requireLearningPackPermission('admin.learning-packs.assign')
+        : undefined,
       schema: { body: zodToJsonSchema(learningPackAssignmentSchema) },
     },
     async (request, reply) => {
@@ -970,7 +994,9 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
       const input = { ...parsed, learningPackId };
       try {
         const result = await (learning as any).assignLearningPack(input, request.user!.uid);
-        return reply.status(200).send({ assignedCount: result.created, skippedCount: result.skipped });
+        return reply
+          .status(200)
+          .send({ assignedCount: result.created, skippedCount: result.skipped });
       } catch (error) {
         if ((error as Error).message === 'LEARNING_PACK_NOT_FOUND') {
           throw new NotFoundError('Learning pack not found');
@@ -987,18 +1013,28 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     },
   );
 
-  app.post('/admin/learning-packs/:learningPackId/publish', {
-    preHandler: authService ? requireLearningPackPermission('admin.learning-packs.publish') : undefined,
-  }, async (request) => {
-    const { learningPackId } = request.params as { learningPackId: string };
-    try { return await learning.publishLearningPack(learningPackId, request.user!.uid); }
-    catch (error) {
-      if ((error as Error).message === 'LEARNING_PACK_NOT_FOUND') throw new NotFoundError('Learning pack not found');
-      if ((error as Error).message === 'LEARNING_PACK_REVIEW_INCOMPLETE')
-        throw new UnprocessableEntityError('Learning pack review must be approved before publication.');
-      throw error;
-    }
-  });
+  app.post(
+    '/admin/learning-packs/:learningPackId/publish',
+    {
+      preHandler: authService
+        ? requireLearningPackPermission('admin.learning-packs.publish')
+        : undefined,
+    },
+    async (request) => {
+      const { learningPackId } = request.params as { learningPackId: string };
+      try {
+        return await learning.publishLearningPack(learningPackId, request.user!.uid);
+      } catch (error) {
+        if ((error as Error).message === 'LEARNING_PACK_NOT_FOUND')
+          throw new NotFoundError('Learning pack not found');
+        if ((error as Error).message === 'LEARNING_PACK_REVIEW_INCOMPLETE')
+          throw new UnprocessableEntityError(
+            'Learning pack review must be approved before publication.',
+          );
+        throw error;
+      }
+    },
+  );
 
   app.get('/admin/content-review', async () => ({ data: await learning.listReviewContent() }));
 
@@ -1008,7 +1044,100 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     data: 'listReviewHistory' in learning ? await (learning as any).listReviewHistory() : [],
   }));
 
-  app.get('/admin/users', async () => ({ data: users?.list ? await users.list() : [] }));
+  app.get(
+    '/admin/users',
+    { preHandler: authService ? requireAdminPermission('admin.users.read') : undefined },
+    async (request) => {
+      const query = request.query as {
+        query?: string;
+        role?: string;
+        status?: string;
+        cohortId?: string;
+        limit?: string;
+        cursor?: string;
+      };
+      const allUsers = users?.list ? ((await users.list()) as any[]) : [];
+      const needle = String(query.query ?? '')
+        .trim()
+        .toLowerCase();
+      const role = String(query.role ?? '')
+        .trim()
+        .toLowerCase();
+      const status = String(query.status ?? '')
+        .trim()
+        .toLowerCase();
+      const cohortId = String(query.cohortId ?? '').trim();
+      const limit = Math.min(100, Math.max(1, Number(query.limit) || 25));
+      const ordered = allUsers
+        .filter(
+          (user) =>
+            !needle ||
+            `${user.displayName ?? ''} ${user.email ?? ''}`.toLowerCase().includes(needle),
+        )
+        .filter(
+          (user) =>
+            !role ||
+            (user.roles ?? []).some((value: unknown) => String(value).toLowerCase() === role),
+        )
+        .filter((user) => !status || String(user.status ?? 'active').toLowerCase() === status)
+        .filter((user) => !cohortId || user.activeCohortId === cohortId)
+        .sort(
+          (a, b) =>
+            String(a.createdUtc ?? '').localeCompare(String(b.createdUtc ?? '')) ||
+            String(a.uid).localeCompare(String(b.uid)),
+        );
+      let offset = 0;
+      if (query.cursor) {
+        try {
+          offset = Number(Buffer.from(query.cursor, 'base64url').toString('utf8'));
+        } catch {
+          throw new ValidationAppError({ cursor: ['Cursor is invalid.'] });
+        }
+        if (!Number.isSafeInteger(offset) || offset < 0)
+          throw new ValidationAppError({ cursor: ['Cursor is invalid.'] });
+      }
+      const items = ordered.slice(offset, offset + limit).map((user) => ({
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName ?? '',
+        emailVerified: Boolean(user.emailVerified),
+        disabled: user.disabled === true || String(user.status).toLowerCase() === 'disabled',
+        status: String(user.status ?? 'active').toLowerCase(),
+        roles: user.roles ?? [],
+        mfaEnabled: Boolean(user.mfaEnabled),
+        adminMfaRequired: Boolean(user.administrativeMfaRequired),
+        activeCohortId: user.activeCohortId ?? null,
+        activeCohortName: user.activeCohortName ?? null,
+        photoUrl: user.photoUrl ?? null,
+        authProvider: user.authProvider ?? 'firebase',
+        lastSignInAtUtc:
+          user.lastLoginAt instanceof Date
+            ? user.lastLoginAt.toISOString()
+            : (user.lastLoginAt ?? null),
+      }));
+      return {
+        items,
+        total: ordered.length,
+        nextCursor:
+          offset + items.length < ordered.length
+            ? Buffer.from(String(offset + items.length)).toString('base64url')
+            : null,
+      };
+    },
+  );
+
+  app.post(
+    '/admin/enrollments/learning-pack-assignments',
+    {
+      preHandler: authService ? requireAdminPermission('admin.enrollments.manage') : undefined,
+      schema: { body: zodToJsonSchema(bulkLearningPackAssignmentSchema) },
+      bodyLimit: 64 * 1024,
+    },
+    async (request) => {
+      const input = bulkLearningPackAssignmentSchema.parse(request.body);
+      return (learning as any).bulkAssignLearningPacks(input, request.user!.uid, request.id);
+    },
+  );
 
   app.get(
     '/admin/scholars',
