@@ -50,7 +50,7 @@ export function problemDetails(error: Error, request: FastifyRequest) {
     traceId: request.id,
     correlationId: request.id,
     fieldErrors,
-    ...(status === 404 ? { instance: request.url } : {}),
+    instance: request.url,
     ...(app?.errors ? { errors: app.errors, validationErrors: app.errors } : {}),
     ...(validationErrors ? { errors: validationErrors, validationErrors } : {}),
   };

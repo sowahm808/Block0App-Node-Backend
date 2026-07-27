@@ -30,6 +30,8 @@ import {
   LearningPackImportService,
 } from './modules/learning/import-workflow.js';
 import { learningPackImportRoutes } from './modules/learning/import.routes.js';
+import { CohortsRepository } from './modules/cohorts/cohorts.repository.js';
+import { cohortRoutes } from './modules/cohorts/cohorts.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -72,6 +74,27 @@ export async function buildApp(overrides?: any) {
       : new UsersRepository(getFirebase().db, env.FIREBASE_USERS_COLLECTION));
   const authService =
     overrides?.authService ?? new AuthService(getFirebase().auth, users!, sessions, env);
+  const cohorts =
+    overrides?.cohorts ??
+    (overrides
+      ? {
+          async list() {
+            return { items: [], nextCursor: null };
+          },
+          async create(input: any) {
+            return { id: 'cohort-test', ...input, status: 'draft', version: 1 };
+          },
+          async update(id: string, input: any, version: number) {
+            return { id, ...input, version: version + 1 };
+          },
+          async setStatus(id: string, status: string, version: number) {
+            return { id, status, version: version + 1 };
+          },
+          async duplicate(_id: string, input: any) {
+            return { id: 'cohort-copy-test', ...input, status: 'draft', version: 1 };
+          },
+        }
+      : new CohortsRepository(getFirebase().db));
   const readiness = overrides?.readiness ?? new ReadinessService(getFirebase().db);
   const notifications =
     overrides?.notifications ??
@@ -802,6 +825,7 @@ export async function buildApp(overrides?: any) {
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await v1.register(learningRoutes, { learning, authService, users } as any);
       await v1.register(adminRoutes, { learning, authService } as any);
+      await v1.register(cohortRoutes, { cohorts, authService } as any);
       if (imports) await v1.register(learningPackImportRoutes, { imports, authService } as any);
       await v1.register(notificationsRoutes, {
         prefix: '/notifications',
@@ -834,6 +858,7 @@ export async function buildApp(overrides?: any) {
       await api.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await api.register(learningRoutes, { learning, authService, users } as any);
       await api.register(adminRoutes, { learning, authService } as any);
+      await api.register(cohortRoutes, { cohorts, authService } as any);
       await api.register(notificationsRoutes, {
         prefix: '/notifications',
         notifications,

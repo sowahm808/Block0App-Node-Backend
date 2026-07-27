@@ -591,7 +591,6 @@ describe('MindUnlocking API', () => {
       '/mentor/teams',
       '/mentor/support-requests',
       '/admin/challenges',
-      '/admin/cohorts',
       '/admin/content-review',
       '/admin/reports',
       '/admin/audit',
@@ -611,6 +610,9 @@ describe('MindUnlocking API', () => {
 
     const anonymousAdminUsers = await app.inject('/api/v1/admin/users');
     expect(anonymousAdminUsers.statusCode).toBe(401);
+
+    const anonymousCohorts = await app.inject('/api/v1/admin/cohorts');
+    expect(anonymousCohorts.statusCode).toBe(401);
 
     const anonymousAdminPacks = await app.inject('/api/v1/admin/learning-packs');
     expect(anonymousAdminPacks.statusCode).toBe(401);
