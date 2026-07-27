@@ -36,6 +36,13 @@ import { ReportsRepository } from './modules/reports/reports.repository.js';
 import { reportsRoutes } from './modules/reports/reports.routes.js';
 import { AuditService } from './modules/audit/audit.service.js';
 import { auditRoutes } from './modules/audit/audit.routes.js';
+import { SystemSettingsRepository } from './modules/system-settings/system-settings.repository.js';
+import { SystemSettingsService } from './modules/system-settings/system-settings.service.js';
+import { systemSettingsRoutes } from './modules/system-settings/system-settings.routes.js';
+import {
+  defaultSystemSettings,
+  SYSTEM_SETTINGS_SCHEMA_VERSION,
+} from './modules/system-settings/system-settings.schemas.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -139,6 +146,53 @@ export async function buildApp(overrides?: any) {
           },
         }
       : new AuditService(getFirebase().db, env.ACCESS_TOKEN_SECRET));
+  const systemSettingsRepository =
+    overrides?.systemSettingsRepository ??
+    (overrides
+      ? (() => {
+          let record: any = {
+            ...structuredClone(defaultSystemSettings),
+            schemaVersion: SYSTEM_SETTINGS_SCHEMA_VERSION,
+            version: 0,
+            updatedAtUtc: null,
+            updatedBy: null,
+          };
+          const events: any[] = [];
+          return {
+            async get() {
+              return structuredClone(record);
+            },
+            async transact(expectedVersion: number, next: any, actor: any, event: any) {
+              if (record.version !== expectedVersion) {
+                const { SettingsVersionConflictError } =
+                  await import('./modules/system-settings/system-settings.repository.js');
+                throw new SettingsVersionConflictError(record.version);
+              }
+              record = {
+                ...structuredClone(next),
+                schemaVersion: SYSTEM_SETTINGS_SCHEMA_VERSION,
+                version: expectedVersion + 1,
+                updatedAtUtc: new Date().toISOString(),
+                updatedBy: actor.uid,
+              };
+              events.unshift({
+                id: `settings-${events.length + 1}`,
+                occurredAtUtc: record.updatedAtUtc,
+                administrator: actor.displayName || actor.email || actor.uid,
+                category: event.category,
+                changedFields: event.changedFields,
+                result: event.result,
+              });
+              return structuredClone(record);
+            },
+            async history(limit: number) {
+              return { items: events.slice(0, limit), nextCursor: null };
+            },
+          };
+        })()
+      : new SystemSettingsRepository(getFirebase().db));
+  const systemSettings =
+    overrides?.systemSettings ?? new SystemSettingsService(systemSettingsRepository, env);
   const readiness = overrides?.readiness ?? new ReadinessService(getFirebase().db);
   const notifications =
     overrides?.notifications ??
@@ -871,6 +925,7 @@ export async function buildApp(overrides?: any) {
       await v1.register(adminRoutes, { learning, authService } as any);
       await v1.register(reportsRoutes, { reports, authService });
       await v1.register(auditRoutes, { audit, authService });
+      await v1.register(systemSettingsRoutes, { systemSettings, authService });
       await v1.register(cohortRoutes, { cohorts, authService } as any);
       if (imports) await v1.register(learningPackImportRoutes, { imports, authService } as any);
       await v1.register(notificationsRoutes, {

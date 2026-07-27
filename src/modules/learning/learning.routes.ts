@@ -1294,16 +1294,6 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     },
   );
 
-  app.get(
-    '/admin/system-settings',
-    { preHandler: requireAdminPermission('admin.system.read') },
-    async () => ({
-      data: (learning as any).getSanitizedSystemSettings
-        ? await (learning as any).getSanitizedSystemSettings()
-        : await (learning as any).getSystemSettings(),
-    }),
-  );
-
   app.get('/readiness', async () => ({ data: await learning.getReadiness() }));
 
   app.get('/readiness/prompts', async () => ({ data: await learning.listReadinessPrompts() }));
