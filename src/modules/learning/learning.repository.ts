@@ -1061,6 +1061,317 @@ export class LearningRepository {
     );
   }
 
+  private challengeCursorSecret() {
+    return process.env.ACCESS_TOKEN_SECRET ?? 'development-only-challenge-cursor-secret';
+  }
+
+  private encodeChallengeCursor(payload: unknown) {
+    const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signature = crypto
+      .createHmac('sha256', this.challengeCursorSecret())
+      .update(data)
+      .digest('base64url');
+    return `${data}.${signature}`;
+  }
+
+  private decodeChallengeCursor(cursor: string) {
+    const [data, supplied, extra] = cursor.split('.');
+    if (!data || !supplied || extra) throw new Error('INVALID_CHALLENGE_CURSOR');
+    const expected = crypto
+      .createHmac('sha256', this.challengeCursorSecret())
+      .update(data)
+      .digest();
+    let actual: Buffer;
+    try {
+      actual = Buffer.from(supplied, 'base64url');
+    } catch {
+      throw new Error('INVALID_CHALLENGE_CURSOR');
+    }
+    if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected))
+      throw new Error('INVALID_CHALLENGE_CURSOR');
+    try {
+      return JSON.parse(Buffer.from(data, 'base64url').toString('utf8')) as {
+        sort: string;
+        values: unknown[];
+      };
+    } catch {
+      throw new Error('INVALID_CHALLENGE_CURSOR');
+    }
+  }
+
+  private challengeDate(value: any): string | undefined {
+    if (!value) return undefined;
+    const date = typeof value.toDate === 'function' ? value.toDate() : new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+
+  private serializeAdminChallenge(id: string, value: any) {
+    const optional = (key: string, item: unknown) =>
+      item === undefined || item === null || item === '' ? {} : { [key]: item };
+    let status = value.status ?? 'draft';
+    const now = Date.now();
+    const startsAt = this.challengeDate(value.startsAt ?? value.startsAtUtc);
+    const endsAt = this.challengeDate(value.endsAt ?? value.endsAtUtc);
+    if (status === 'scheduled' && startsAt && Date.parse(startsAt) <= now) status = 'active';
+    if (status === 'active' && endsAt && Date.parse(endsAt) < now) status = 'completed';
+    return {
+      id,
+      title: value.title,
+      slug: value.slug,
+      status,
+      version: Number(value.version) || 1,
+      ...optional('description', value.description),
+      ...optional('audience', value.audience),
+      ...optional('startsAtUtc', startsAt),
+      ...optional('endsAtUtc', endsAt),
+      ...optional('durationDays', value.durationDays),
+      learningPackCount: Number(value.learningPackCount) || 0,
+      cohortCount: Number(value.cohortCount) || 0,
+      enrollmentCount: Number(value.enrollmentCount) || 0,
+      ...optional('createdAtUtc', this.challengeDate(value.createdAt)),
+      ...optional('createdBy', value.createdBy),
+      ...optional('updatedAtUtc', this.challengeDate(value.updatedAt ?? value.updatedAtUtc)),
+      ...optional('updatedBy', value.updatedBy),
+      ...optional('publishedAtUtc', this.challengeDate(value.publishedAt)),
+      ...optional('publishedBy', value.publishedBy),
+      ...optional('archivedAtUtc', this.challengeDate(value.archivedAt)),
+      ...optional('archivedBy', value.archivedBy),
+    };
+  }
+
+  async listAdminChallenges(input: {
+    query?: string;
+    status?: string;
+    sort: 'updated-desc' | 'start-asc' | 'title-asc';
+    pageSize: number;
+    cursor?: string;
+  }) {
+    let query: any = this.db.collection('challenges');
+    if (input.status) query = query.where('status', '==', input.status);
+    const search = input.query?.trim().toLowerCase();
+    if (search) {
+      query = query
+        .where('titleSearch', '>=', search)
+        .where('titleSearch', '<=', `${search}\uf8ff`);
+    }
+    const orders: Array<[string, 'asc' | 'desc']> = search
+      ? [
+          ['titleSearch', 'asc'],
+          ['__name__', 'asc'],
+        ]
+      : input.sort === 'start-asc'
+        ? [
+            ['startsAt', 'asc'],
+            ['__name__', 'asc'],
+          ]
+        : input.sort === 'title-asc'
+          ? [
+              ['titleSearch', 'asc'],
+              ['__name__', 'asc'],
+            ]
+          : [
+              ['updatedAt', 'desc'],
+              ['__name__', 'desc'],
+            ];
+    for (const [field, direction] of orders) query = query.orderBy(field, direction);
+
+    const countQuery = query;
+    if (input.cursor) {
+      const decoded = this.decodeChallengeCursor(input.cursor);
+      if (decoded.sort !== `${input.sort}:${search ?? ''}:${input.status ?? ''}`)
+        throw new Error('INVALID_CHALLENGE_CURSOR');
+      const values = decoded.values.map((value: any, index) =>
+        orders[index]?.[0] !== '__name__' && value?.timestamp
+          ? Timestamp.fromMillis(value.timestamp)
+          : value,
+      );
+      query = query.startAfter(...values);
+    }
+    const [snapshot, countSnapshot] = await Promise.all([
+      query.limit(input.pageSize + 1).get(),
+      countQuery.count().get(),
+    ]);
+    const page = snapshot.docs.slice(0, input.pageSize);
+    const last = page.at(-1);
+    const values = last
+      ? orders.map(([field]) => {
+          const value = field === '__name__' ? last.id : last.get(field);
+          return value instanceof Timestamp ? { timestamp: value.toMillis() } : value;
+        })
+      : [];
+    return {
+      items: page.map((doc: any) => this.serializeAdminChallenge(doc.id, doc.data())),
+      total: countSnapshot.data().count,
+      nextCursor:
+        snapshot.docs.length > input.pageSize && last
+          ? this.encodeChallengeCursor({
+              sort: `${input.sort}:${search ?? ''}:${input.status ?? ''}`,
+              values,
+            })
+          : null,
+    };
+  }
+
+  async getAdminChallenge(id: string) {
+    const snapshot = await this.db.collection('challenges').doc(id).get();
+    return snapshot.exists ? this.serializeAdminChallenge(snapshot.id, snapshot.data()) : null;
+  }
+
+  private challengeWriteFields(input: any): Record<string, unknown> {
+    return removeUndefinedProperties({
+      title: input.title,
+      titleSearch: input.title?.trim().toLowerCase(),
+      slug: input.slug?.trim().toLowerCase(),
+      description: input.description,
+      audience: input.audience,
+      startsAt:
+        input.startsAtUtc === undefined
+          ? undefined
+          : input.startsAtUtc === null
+            ? null
+            : Timestamp.fromDate(new Date(input.startsAtUtc)),
+      endsAt:
+        input.endsAtUtc === undefined
+          ? undefined
+          : input.endsAtUtc === null
+            ? null
+            : Timestamp.fromDate(new Date(input.endsAtUtc)),
+      durationDays: input.durationDays,
+    }) as Record<string, unknown>;
+  }
+
+  async createAdminChallenge(input: any, actorId: string, correlationId: string) {
+    const ref = this.db.collection('challenges').doc();
+    await this.db.runTransaction(async (transaction) => {
+      const slugRef = this.db.collection('challengeSlugs').doc(input.slug.toLowerCase());
+      if ((await transaction.get(slugRef)).exists) throw new Error('CHALLENGE_SLUG_CONFLICT');
+      const now = Timestamp.now();
+      const value = {
+        ...this.challengeWriteFields(input),
+        status: 'draft',
+        version: 1,
+        learningPackCount: 0,
+        cohortCount: 0,
+        enrollmentCount: 0,
+        createdAt: now,
+        createdBy: actorId,
+        updatedAt: now,
+        updatedBy: actorId,
+      };
+      transaction.create(ref, value);
+      transaction.create(slugRef, { challengeId: ref.id, createdAt: now });
+      const auditRef = this.db.collection('auditLogs').doc();
+      transaction.create(auditRef, {
+        actorUid: actorId,
+        action: 'challenge.create',
+        challengeId: ref.id,
+        oldState: null,
+        newState: 'draft',
+        timestamp: now,
+        correlationId,
+      });
+    });
+    return this.getAdminChallenge(ref.id);
+  }
+
+  async updateAdminChallenge(id: string, input: any, actorId: string, correlationId: string) {
+    const ref = this.db.collection('challenges').doc(id);
+    await this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw new Error('CHALLENGE_NOT_FOUND');
+      const current: any = snapshot.data();
+      if ((Number(current.version) || 1) !== input.version) {
+        const error = new Error('CHALLENGE_VERSION_CONFLICT') as Error & { latestVersion: number };
+        error.latestVersion = Number(current.version) || 1;
+        throw error;
+      }
+      if (input.slug && input.slug !== current.slug) {
+        const slugRef = this.db.collection('challengeSlugs').doc(input.slug);
+        if ((await transaction.get(slugRef)).exists) throw new Error('CHALLENGE_SLUG_CONFLICT');
+        transaction.create(slugRef, { challengeId: id, createdAt: Timestamp.now() });
+        if (current.slug)
+          transaction.delete(this.db.collection('challengeSlugs').doc(current.slug));
+      }
+      const now = Timestamp.now();
+      transaction.update(ref, {
+        ...this.challengeWriteFields(input),
+        version: input.version + 1,
+        updatedAt: now,
+        updatedBy: actorId,
+      } as any);
+      transaction.create(this.db.collection('auditLogs').doc(), {
+        actorUid: actorId,
+        action: 'challenge.update',
+        challengeId: id,
+        oldState: current.status,
+        newState: current.status,
+        timestamp: now,
+        correlationId,
+      });
+    });
+    return this.getAdminChallenge(id);
+  }
+
+  async transitionAdminChallenge(
+    id: string,
+    action: 'publish' | 'archive',
+    actorId: string,
+    correlationId: string,
+  ) {
+    const ref = this.db.collection('challenges').doc(id);
+    await this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) throw new Error('CHALLENGE_NOT_FOUND');
+      const current: any = snapshot.data();
+      if (action === 'archive' && current.status === 'archived') return;
+      if (action === 'publish' && ['scheduled', 'active'].includes(current.status)) return;
+      if (action === 'publish' && current.status !== 'draft')
+        throw new Error('CHALLENGE_INVALID_TRANSITION');
+      if (action === 'archive' && current.status === 'archived') return;
+      const now = Timestamp.now();
+      let next = 'archived';
+      if (action === 'publish') {
+        const errors: Record<string, string[]> = {};
+        if (!current.title) errors.title = ['Title is required.'];
+        if (!current.slug) errors.slug = ['Slug is required.'];
+        if (!current.startsAt) errors.startsAtUtc = ['Start date is required.'];
+        if (!current.endsAt) errors.endsAtUtc = ['End date is required.'];
+        if (
+          current.startsAt &&
+          current.endsAt &&
+          current.startsAt.toMillis() >= current.endsAt.toMillis()
+        )
+          errors.endsAtUtc = ['End date must be after the start date.'];
+        if ((Number(current.learningPackCount) || 0) < 1)
+          errors.learningPackCount = ['At least one learning pack is required.'];
+        if (Object.keys(errors).length) {
+          const error = new Error('CHALLENGE_VALIDATION') as Error & { errors: unknown };
+          error.errors = errors;
+          throw error;
+        }
+        next = current.startsAt.toMillis() > now.toMillis() ? 'scheduled' : 'active';
+      }
+      transaction.update(ref, {
+        status: next,
+        version: (Number(current.version) || 1) + 1,
+        updatedAt: now,
+        updatedBy: actorId,
+        ...(action === 'publish' ? { publishedAt: now, publishedBy: actorId } : {}),
+        ...(action === 'archive' ? { archivedAt: now, archivedBy: actorId } : {}),
+      });
+      transaction.create(this.db.collection('auditLogs').doc(), {
+        actorUid: actorId,
+        action: `challenge.${action}`,
+        challengeId: id,
+        oldState: current.status,
+        newState: next,
+        timestamp: now,
+        correlationId,
+      });
+    });
+    return this.getAdminChallenge(id);
+  }
+
   private scenarioSummary(scenario: any, attempts: any[]) {
     const scenarioAttempts = attempts.filter((attempt) => attempt.scenarioId === scenario.id);
     const completed = scenarioAttempts

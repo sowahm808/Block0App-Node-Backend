@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
+  AppError,
   NotFoundError,
   ContentReviewNotFoundError,
   ForbiddenError,
@@ -23,6 +24,12 @@ import {
   bulkLearningPackAssignmentSchema,
   learningPackAssignmentSchema,
 } from './learning-pack-assignments.schemas.js';
+import {
+  challengeListQuerySchema,
+  challengeParamsSchema,
+  createChallengeSchema,
+  updateChallengeSchema,
+} from './challenge.schemas.js';
 
 type LearningRoutesOptions = {
   learning: LearningRepository;
@@ -918,7 +925,132 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/admin/dashboard', getLegacyDashboard);
 
-  app.get('/admin/challenges', async () => ({ data: await learning.listChallenges() }));
+  const challengePermission = (permission: string) =>
+    authService ? requireAdminPermission(permission) : undefined;
+  const challengeError = (error: unknown): never => {
+    const value = error as Error & { errors?: unknown; latestVersion?: number };
+    if (value.message === 'CHALLENGE_NOT_FOUND') throw new NotFoundError('Challenge not found');
+    if (value.message === 'CHALLENGE_SLUG_CONFLICT')
+      throw new ConflictError('A challenge already uses this slug.');
+    if (value.message === 'CHALLENGE_INVALID_TRANSITION')
+      throw new ConflictError('The requested challenge lifecycle transition is invalid.');
+    if (value.message === 'CHALLENGE_VERSION_CONFLICT')
+      throw new AppError(
+        409,
+        'Conflict',
+        'The challenge was updated by another administrator.',
+        'conflict',
+        { version: [`Latest version is ${value.latestVersion}.`] },
+      );
+    if (value.message === 'CHALLENGE_VALIDATION')
+      throw new AppError(
+        422,
+        'Unprocessable Entity',
+        'Challenge cannot be published until validation succeeds.',
+        'unprocessable_entity',
+        value.errors,
+      );
+    if (value.message === 'INVALID_CHALLENGE_CURSOR')
+      throw new ValidationAppError({ cursor: ['Cursor is invalid or does not match this query.'] });
+    throw error;
+  };
+  const parseChallengeBody = <T>(schema: z.ZodType<T>, body: unknown): T => {
+    const result = schema.safeParse(body);
+    if (!result.success)
+      throw new AppError(
+        422,
+        'Unprocessable Entity',
+        'Challenge field validation failed.',
+        'unprocessable_entity',
+        result.error.flatten(),
+      );
+    return result.data;
+  };
+
+  app.get(
+    '/admin/challenges',
+    { preHandler: challengePermission('admin.challenges.read') },
+    async (request) => {
+      const query = challengeListQuerySchema.parse(request.query);
+      try {
+        return await (learning as any).listAdminChallenges(query);
+      } catch (error) {
+        return challengeError(error);
+      }
+    },
+  );
+
+  app.get(
+    '/admin/challenges/:id',
+    { preHandler: challengePermission('admin.challenges.read') },
+    async (request) => {
+      const { id } = challengeParamsSchema.parse(request.params);
+      const challenge = await (learning as any).getAdminChallenge(id);
+      if (!challenge) throw new NotFoundError('Challenge not found');
+      return challenge;
+    },
+  );
+
+  app.post(
+    '/admin/challenges',
+    { preHandler: challengePermission('admin.challenges.write') },
+    async (request, reply) => {
+      const input = parseChallengeBody(createChallengeSchema, request.body);
+      try {
+        const challenge = await (learning as any).createAdminChallenge(
+          input,
+          request.user!.uid,
+          request.id,
+        );
+        return reply.status(201).send(challenge);
+      } catch (error) {
+        return challengeError(error);
+      }
+    },
+  );
+
+  app.put(
+    '/admin/challenges/:id',
+    { preHandler: challengePermission('admin.challenges.write') },
+    async (request) => {
+      const { id } = challengeParamsSchema.parse(request.params);
+      const input = parseChallengeBody(updateChallengeSchema, request.body);
+      try {
+        return await (learning as any).updateAdminChallenge(
+          id,
+          input,
+          request.user!.uid,
+          request.id,
+        );
+      } catch (error) {
+        return challengeError(error);
+      }
+    },
+  );
+
+  for (const action of ['publish', 'archive'] as const) {
+    app.post(
+      `/admin/challenges/:id/${action}`,
+      {
+        preHandler: challengePermission(
+          action === 'publish' ? 'admin.challenges.publish' : 'admin.challenges.archive',
+        ),
+      },
+      async (request) => {
+        const { id } = challengeParamsSchema.parse(request.params);
+        try {
+          return await (learning as any).transitionAdminChallenge(
+            id,
+            action,
+            request.user!.uid,
+            request.id,
+          );
+        } catch (error) {
+          return challengeError(error);
+        }
+      },
+    );
+  }
 
   app.get('/admin/cohorts', async () => ({ data: await learning.listTeams() }));
 
