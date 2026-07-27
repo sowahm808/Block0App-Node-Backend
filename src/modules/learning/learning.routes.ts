@@ -1052,8 +1052,6 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     );
   }
 
-  app.get('/admin/cohorts', async () => ({ data: await learning.listTeams() }));
-
   app.get(
     '/admin/learning-packs',
     {
