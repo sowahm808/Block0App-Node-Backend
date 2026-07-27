@@ -643,8 +643,6 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     }),
   );
 
-  app.get('/mentor/teams', async () => ({ data: await learning.listTeams() }));
-
   app.get('/mentor/support-requests', async () => ({
     data: 'listSupportRequests' in learning ? await (learning as any).listSupportRequests() : [],
   }));

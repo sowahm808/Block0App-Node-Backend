@@ -43,6 +43,8 @@ import {
   defaultSystemSettings,
   SYSTEM_SETTINGS_SCHEMA_VERSION,
 } from './modules/system-settings/system-settings.schemas.js';
+import { MentorTeamsRepository } from './modules/mentor-teams/mentor-teams.repository.js';
+import { mentorTeamRoutes } from './modules/mentor-teams/mentor-teams.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -193,6 +195,18 @@ export async function buildApp(overrides?: any) {
       : new SystemSettingsRepository(getFirebase().db));
   const systemSettings =
     overrides?.systemSettings ?? new SystemSettingsService(systemSettingsRepository, env);
+  const mentorTeams =
+    overrides?.mentorTeams ??
+    (overrides
+      ? {
+          async list(_principal: any, input: any) {
+            return { items: [], page: input.page, pageSize: input.pageSize, total: 0 };
+          },
+          async detail() {
+            return null;
+          },
+        }
+      : new MentorTeamsRepository(getFirebase().db));
   const readiness = overrides?.readiness ?? new ReadinessService(getFirebase().db);
   const notifications =
     overrides?.notifications ??
@@ -927,6 +941,7 @@ export async function buildApp(overrides?: any) {
       await v1.register(auditRoutes, { audit, authService });
       await v1.register(systemSettingsRoutes, { systemSettings, authService });
       await v1.register(cohortRoutes, { cohorts, authService } as any);
+      await v1.register(mentorTeamRoutes, { mentorTeams, authService } as any);
       if (imports) await v1.register(learningPackImportRoutes, { imports, authService } as any);
       await v1.register(notificationsRoutes, {
         prefix: '/notifications',
