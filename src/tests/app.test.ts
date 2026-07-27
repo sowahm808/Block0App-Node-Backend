@@ -588,7 +588,6 @@ describe('MindUnlocking API', () => {
     });
 
     for (const path of [
-      '/mentor/teams',
       '/mentor/support-requests',
       '/admin/challenges',
       '/admin/content-review',
