@@ -593,7 +593,6 @@ describe('MindUnlocking API', () => {
       '/admin/challenges',
       '/admin/content-review',
       '/admin/reports',
-      '/admin/audit',
       '/certificates',
       '/mentor/dashboard',
       '/review/dashboard',

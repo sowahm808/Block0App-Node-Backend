@@ -34,6 +34,8 @@ import { CohortsRepository } from './modules/cohorts/cohorts.repository.js';
 import { cohortRoutes } from './modules/cohorts/cohorts.routes.js';
 import { ReportsRepository } from './modules/reports/reports.repository.js';
 import { reportsRoutes } from './modules/reports/reports.routes.js';
+import { AuditService } from './modules/audit/audit.service.js';
+import { auditRoutes } from './modules/audit/audit.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -122,6 +124,21 @@ export async function buildApp(overrides?: any) {
           },
         }
       : new ReportsRepository(getFirebase().db));
+  const audit =
+    overrides?.audit ??
+    (overrides
+      ? {
+          async list() {
+            return { items: [], nextCursor: null };
+          },
+          async detail() {
+            return null;
+          },
+          async append(input: any) {
+            return input;
+          },
+        }
+      : new AuditService(getFirebase().db, env.ACCESS_TOKEN_SECRET));
   const readiness = overrides?.readiness ?? new ReadinessService(getFirebase().db);
   const notifications =
     overrides?.notifications ??
@@ -853,6 +870,7 @@ export async function buildApp(overrides?: any) {
       await v1.register(learningRoutes, { learning, authService, users } as any);
       await v1.register(adminRoutes, { learning, authService } as any);
       await v1.register(reportsRoutes, { reports, authService });
+      await v1.register(auditRoutes, { audit, authService });
       await v1.register(cohortRoutes, { cohorts, authService } as any);
       if (imports) await v1.register(learningPackImportRoutes, { imports, authService } as any);
       await v1.register(notificationsRoutes, {
