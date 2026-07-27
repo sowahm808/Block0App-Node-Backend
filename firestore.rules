@@ -1,2 +1,24 @@
 rules_version = '2';
-service cloud.firestore { match /databases/{database}/documents { function signedIn(){ return request.auth != null; } function isAdmin(){ return signedIn() && request.auth.token.permission.hasAny(['admin:access']); } match /users/{uid} { allow read: if signedIn() && (request.auth.uid == uid || isAdmin()); allow delete: if isAdmin(); allow create, update: if false; } match /refreshSessions/{id} { allow read, write: if false; } match /outboxMessages/{id} { allow read, write: if isAdmin(); } match /{document=**} { allow read, write: if isAdmin(); } } }
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() {
+      return signedIn() && request.auth.token.permission.hasAny(['admin:access']);
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow delete: if isAdmin();
+      allow create, update: if false;
+    }
+
+    // Administrative assignment and audit data is server-only. Admin HTTP routes
+    // use the Firebase Admin SDK after independently authenticating and authorizing.
+    match /assignments/{id} { allow read, write: if false; }
+    match /learningPackAssignmentRequests/{id} { allow read, write: if false; }
+    match /auditLogs/{id} { allow read, write: if false; }
+    match /refreshSessions/{id} { allow read, write: if false; }
+    match /outboxMessages/{id} { allow read, write: if isAdmin(); }
+    match /{document=**} { allow read, write: if isAdmin(); }
+  }
+}

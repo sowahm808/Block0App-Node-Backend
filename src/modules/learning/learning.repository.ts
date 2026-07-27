@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { Firestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import {
   learningSeedCollections,
   sampleChallengeDays,
@@ -41,6 +41,8 @@ import type {
 import type {
   LearningPackAssignmentRequest,
   LearningPackAssignmentResult,
+  BulkLearningPackAssignmentRequest,
+  BulkLearningPackAssignmentResult,
 } from './learning-pack-assignments.schemas.js';
 
 const rewardTypeMap: Record<string, string> = {
@@ -282,8 +284,11 @@ const parseAdminPackCursor = (cursor?: string): [unknown, string] | null => {
   try {
     const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
     return Array.isArray(value) && value.length === 2 && typeof value[1] === 'string'
-      ? [value[0], value[1]] : null;
-  } catch { return null; }
+      ? [value[0], value[1]]
+      : null;
+  } catch {
+    return null;
+  }
 };
 
 const normalizeFilterValue = (value: unknown) =>
@@ -335,15 +340,124 @@ export class LearningRepository {
     private usersCollectionName = 'users',
   ) {}
 
+  async bulkAssignLearningPacks(
+    input: BulkLearningPackAssignmentRequest,
+    actorId: string,
+    correlationId: string,
+  ): Promise<BulkLearningPackAssignmentResult> {
+    const userRefs = input.scholarIds.map((id) =>
+      this.db.collection(this.usersCollectionName).doc(id),
+    );
+    const packRefs = input.learningPackIds.map((id) => this.db.collection('learningPacks').doc(id));
+    const [users, packs] = await Promise.all([
+      this.db.getAll(...userRefs),
+      this.db.getAll(...packRefs),
+    ]);
+    const userErrors = new Map<string, string>();
+    users.forEach((document, index) => {
+      const data = document.data() as any;
+      const roles = Array.isArray(data?.roles)
+        ? data.roles.map((role: unknown) => String(role).toLowerCase())
+        : [];
+      if (!document.exists) userErrors.set(input.scholarIds[index], 'Scholar was not found.');
+      else if (!roles.includes('scholar'))
+        userErrors.set(input.scholarIds[index], 'User does not have the Scholar role.');
+      else if (
+        data.disabled === true ||
+        ['suspended', 'disabled', 'deleted', 'inactive'].includes(String(data.status).toLowerCase())
+      )
+        userErrors.set(input.scholarIds[index], 'Scholar is not active.');
+    });
+    const packErrors = new Map<string, string>();
+    packs.forEach((document, index) => {
+      if (!document.exists)
+        packErrors.set(input.learningPackIds[index], 'Learning pack was not found.');
+      else if (publicationStatusOf(document.data()) !== 'published')
+        packErrors.set(input.learningPackIds[index], 'Learning pack is not published.');
+    });
+
+    const result: BulkLearningPackAssignmentResult = {
+      createdCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      failures: [],
+    };
+    const valid: Array<{ scholarId: string; learningPackId: string }> = [];
+    for (const scholarId of input.scholarIds)
+      for (const learningPackId of input.learningPackIds) {
+        const message = userErrors.get(scholarId) ?? packErrors.get(learningPackId);
+        if (message) {
+          result.failedCount += 1;
+          if (result.failures.length < 2500)
+            result.failures.push({ scholarId, learningPackId, message });
+        } else valid.push({ scholarId, learningPackId });
+      }
+
+    await Promise.all(
+      valid.map(async ({ scholarId, learningPackId }) => {
+        const id = crypto
+          .createHash('sha256')
+          .update(`${scholarId}:${learningPackId}`)
+          .digest('hex');
+        const ref = this.db.collection('assignments').doc(id);
+        const created = await this.db.runTransaction(async (transaction) => {
+          if ((await transaction.get(ref)).exists) return false;
+          transaction.create(
+            ref,
+            removeUndefinedProperties({
+              scholarId,
+              learningPackId,
+              targetId: scholarId,
+              targetType: 'scholar',
+              status: 'assigned',
+              availableFromUtc: input.availableFromUtc
+                ? Timestamp.fromDate(new Date(input.availableFromUtc))
+                : null,
+              dueAtUtc: input.dueAtUtc ? Timestamp.fromDate(new Date(input.dueAtUtc)) : null,
+              notes: input.notes,
+              assignedBy: actorId,
+              assignedAtUtc: FieldValue.serverTimestamp(),
+              updatedAtUtc: FieldValue.serverTimestamp(),
+            }) as FirebaseFirestore.DocumentData,
+          );
+          return true;
+        });
+        if (created) result.createdCount += 1;
+        else result.skippedCount += 1;
+      }),
+    );
+
+    await this.db.collection('auditLogs').add({
+      action: 'learning_pack.bulk_assigned',
+      actorId,
+      request: { ...input, notes: input.notes ? '[redacted]' : undefined },
+      counts: {
+        created: result.createdCount,
+        skipped: result.skippedCount,
+        failed: result.failedCount,
+      },
+      correlationId,
+      createdAtUtc: FieldValue.serverTimestamp(),
+    });
+    return result;
+  }
+
   async assignLearningPack(
     input: LearningPackAssignmentRequest,
     actorId: string,
   ): Promise<LearningPackAssignmentResult> {
     if (!input.learningPackId) throw new Error('LEARNING_PACK_NOT_FOUND');
     const learningPackId = input.learningPackId;
-    const idempotencyKey = input.idempotencyKey ?? crypto.createHash('sha256')
-      .update(`${learningPackId}:${[...input.scholarIds].sort().join(',')}`).digest('hex');
-    const requestHash = crypto.createHash('sha256').update(JSON.stringify({ ...input, idempotencyKey })).digest('hex');
+    const idempotencyKey =
+      input.idempotencyKey ??
+      crypto
+        .createHash('sha256')
+        .update(`${learningPackId}:${[...input.scholarIds].sort().join(',')}`)
+        .digest('hex');
+    const requestHash = crypto
+      .createHash('sha256')
+      .update(JSON.stringify({ ...input, idempotencyKey }))
+      .digest('hex');
     const idempotencyId = crypto
       .createHash('sha256')
       .update(`${actorId}:${idempotencyKey}`)
@@ -363,7 +477,10 @@ export class LearningRepository {
       const packRef = this.db.collection('learningPacks').doc(learningPackId);
       const pack = await transaction.get(packRef);
       if (!pack.exists) throw new Error('LEARNING_PACK_NOT_FOUND');
-      if (publicationStatusOf(pack.data()) === 'archived' || (pack.data() as any)?.assignable === false) {
+      if (
+        publicationStatusOf(pack.data()) === 'archived' ||
+        (pack.data() as any)?.assignable === false
+      ) {
         throw new Error('LEARNING_PACK_NOT_ASSIGNABLE');
       }
 
@@ -472,9 +589,15 @@ export class LearningRepository {
         createdAtUtc: now,
       });
       const auditRef = this.db.collection('auditLogs').doc();
-      transaction.create(auditRef, { id: auditRef.id, action: 'learning_pack.assigned', actorId,
-        learningPackId, scholarIds: input.scholarIds,
-        result: { assignedCount: created, skippedCount: skipped }, createdAtUtc: now });
+      transaction.create(auditRef, {
+        id: auditRef.id,
+        action: 'learning_pack.assigned',
+        actorId,
+        learningPackId,
+        scholarIds: input.scholarIds,
+        result: { assignedCount: created, skippedCount: skipped },
+        createdAtUtc: now,
+      });
       return result;
     });
   }
@@ -1550,49 +1673,82 @@ export class LearningRepository {
       this.listCollectionOrSeed('questions', sampleQuestions),
       this.listCollectionOrSeed('assignments', sampleAssignments),
     ]);
-    const search = String(query.query ?? '').trim().toLowerCase();
+    const search = String(query.query ?? '')
+      .trim()
+      .toLowerCase();
     const requestedStatus = query.publicationStatus
-      ? normalizeFilterValue(query.publicationStatus) : undefined;
-    const rows = packs.map((pack: any) => {
-      const packCapsules = capsules.filter((item: any) => item.learningPackId === pack.id);
-      const capsuleIds = new Set(packCapsules.map((item: any) => item.id));
-      const packQuestions = questions.filter((item: any) =>
-        item.learningPackId === pack.id || capsuleIds.has(item.capsuleId));
-      return {
-        id: String(pack.id),
-        externalId: String(pack.externalId ?? pack.slug ?? pack.id),
-        code: String(pack.code ?? (pack.dayNumber ? `LP${String(pack.dayNumber).padStart(2, '0')}` : pack.id)),
-        title: String(pack.title ?? ''),
-        description: String(pack.description ?? ''),
-        topic: String(pack.topic ?? pack.subject ?? ''),
-        audience: String(pack.audience ?? pack.level ?? ''),
-        publicationStatus: publicationStatusOf(pack),
-        reviewStatus: String(pack.reviewStatus ?? 'pending'),
-        capsuleCount: Number(pack.capsuleCount ?? packCapsules.length) || 0,
-        questionCount: Number(pack.questionCount ?? packQuestions.length) || 0,
-        assignmentCount: new Set(assignments.filter((item: any) => item.learningPackId === pack.id)
-          .map((item: any) => item.scholarId ?? item.targetId)).size,
-        updatedAtUtc: String(pack.updatedAtUtc ?? pack.updatedAt ?? pack.createdAtUtc ?? new Date(0).toISOString()),
-      };
-    }).filter((pack) => {
-      const searchable = `${pack.title} ${pack.code} ${pack.externalId} ${pack.description} ${pack.topic}`.toLowerCase();
-      return (!search || searchable.includes(search)) &&
-        (!requestedStatus || pack.publicationStatus === requestedStatus);
-    });
+      ? normalizeFilterValue(query.publicationStatus)
+      : undefined;
+    const rows = packs
+      .map((pack: any) => {
+        const packCapsules = capsules.filter((item: any) => item.learningPackId === pack.id);
+        const capsuleIds = new Set(packCapsules.map((item: any) => item.id));
+        const packQuestions = questions.filter(
+          (item: any) => item.learningPackId === pack.id || capsuleIds.has(item.capsuleId),
+        );
+        return {
+          id: String(pack.id),
+          externalId: String(pack.externalId ?? pack.slug ?? pack.id),
+          code: String(
+            pack.code ??
+              (pack.dayNumber ? `LP${String(pack.dayNumber).padStart(2, '0')}` : pack.id),
+          ),
+          title: String(pack.title ?? ''),
+          description: String(pack.description ?? ''),
+          topic: String(pack.topic ?? pack.subject ?? ''),
+          audience: String(pack.audience ?? pack.level ?? ''),
+          publicationStatus: publicationStatusOf(pack),
+          reviewStatus: String(pack.reviewStatus ?? 'pending'),
+          capsuleCount: Number(pack.capsuleCount ?? packCapsules.length) || 0,
+          questionCount: Number(pack.questionCount ?? packQuestions.length) || 0,
+          assignmentCount: new Set(
+            assignments
+              .filter((item: any) => item.learningPackId === pack.id)
+              .map((item: any) => item.scholarId ?? item.targetId),
+          ).size,
+          updatedAtUtc: String(
+            pack.updatedAtUtc ?? pack.updatedAt ?? pack.createdAtUtc ?? new Date(0).toISOString(),
+          ),
+        };
+      })
+      .filter((pack) => {
+        const searchable =
+          `${pack.title} ${pack.code} ${pack.externalId} ${pack.description} ${pack.topic}`.toLowerCase();
+        return (
+          (!search || searchable.includes(search)) &&
+          (!requestedStatus || pack.publicationStatus === requestedStatus)
+        );
+      });
     const [field, requestedDirection] = String(query.sort ?? 'updatedAtUtc:desc').split(':');
-    const sortField = (['title', 'code', 'publicationStatus', 'updatedAtUtc'].includes(field)
-      ? field : 'updatedAtUtc') as keyof (typeof rows)[number];
-    const direction = requestedDirection === 'asc' || (!requestedDirection && field === 'title') ? 1 : -1;
-    rows.sort((a, b) => String(a[sortField]).localeCompare(String(b[sortField])) * direction || a.id.localeCompare(b.id));
+    const sortField = (
+      ['title', 'code', 'publicationStatus', 'updatedAtUtc'].includes(field)
+        ? field
+        : 'updatedAtUtc'
+    ) as keyof (typeof rows)[number];
+    const direction =
+      requestedDirection === 'asc' || (!requestedDirection && field === 'title') ? 1 : -1;
+    rows.sort(
+      (a, b) =>
+        String(a[sortField]).localeCompare(String(b[sortField])) * direction ||
+        a.id.localeCompare(b.id),
+    );
     const cursor = parseAdminPackCursor(query.cursor);
     if (query.cursor && !cursor) throw new Error('INVALID_CATALOG_CURSOR');
-    const start = cursor ? rows.findIndex((row) => row.id === cursor[1] && row[sortField] === cursor[0]) + 1 : 0;
+    const start = cursor
+      ? rows.findIndex((row) => row.id === cursor[1] && row[sortField] === cursor[0]) + 1
+      : 0;
     if (cursor && start === 0) throw new Error('INVALID_CATALOG_CURSOR');
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 25));
     const items = rows.slice(start, start + limit);
     const last = items.at(-1);
-    return { items, total: rows.length, nextCursor: start + items.length < rows.length && last
-      ? adminPackCursor(last[sortField], last.id) : null };
+    return {
+      items,
+      total: rows.length,
+      nextCursor:
+        start + items.length < rows.length && last
+          ? adminPackCursor(last[sortField], last.id)
+          : null,
+    };
   }
 
   async getAdminLearningPack(learningPackId: string) {
@@ -1604,15 +1760,27 @@ export class LearningRepository {
       this.listCollectionOrSeed('capsules', sampleCapsules),
       this.listCollectionOrSeed('contentReviews', sampleContentReviews),
     ]);
-    const pack = packDocument.exists ? packDocument.data() as any
-      : sampleLearningPacks.find((item: any) => item.id === learningPackId) as any;
-    return { ...record,
+    const pack = packDocument.exists
+      ? (packDocument.data() as any)
+      : (sampleLearningPacks.find((item: any) => item.id === learningPackId) as any);
+    return {
+      ...record,
       objectives: pack?.objectives ?? pack?.learningObjectives ?? [],
-      capsules: capsules.filter((item: any) => item.learningPackId === learningPackId)
-        .map((item: any) => ({ id: item.id, title: item.title, description: item.description ?? '', questionCount: item.questionCount ?? 0 })),
+      capsules: capsules
+        .filter((item: any) => item.learningPackId === learningPackId)
+        .map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          description: item.description ?? '',
+          questionCount: item.questionCount ?? 0,
+        })),
       reviewHistory: reviews.filter((item: any) => item.learningPackId === learningPackId),
-      version: { number: Number(pack?.version ?? 1), contentFingerprint: pack?.contentFingerprint ?? null,
-        createdAtUtc: pack?.createdAtUtc ?? null, updatedAtUtc: record.updatedAtUtc },
+      version: {
+        number: Number(pack?.version ?? 1),
+        contentFingerprint: pack?.contentFingerprint ?? null,
+        createdAtUtc: pack?.createdAtUtc ?? null,
+        updatedAtUtc: record.updatedAtUtc,
+      },
     };
   }
 
@@ -1624,12 +1792,28 @@ export class LearningRepository {
       const pack = snapshot.data() as any;
       if (pack.reviewStatus !== 'approved') throw new Error('LEARNING_PACK_REVIEW_INCOMPLETE');
       const now = new Date().toISOString();
-      transaction.update(packRef, { publicationStatus: 'published', status: 'published', publishedAtUtc: now,
-        updatedAtUtc: now, publishedBy: actorId });
+      transaction.update(packRef, {
+        publicationStatus: 'published',
+        status: 'published',
+        publishedAtUtc: now,
+        updatedAtUtc: now,
+        publishedBy: actorId,
+      });
       const auditRef = this.db.collection('auditLogs').doc();
-      transaction.create(auditRef, { id: auditRef.id, action: 'learning_pack.published', actorId,
-        learningPackId, createdAtUtc: now });
-      return { ...pack, id: learningPackId, publicationStatus: 'published', publishedAtUtc: now, updatedAtUtc: now };
+      transaction.create(auditRef, {
+        id: auditRef.id,
+        action: 'learning_pack.published',
+        actorId,
+        learningPackId,
+        createdAtUtc: now,
+      });
+      return {
+        ...pack,
+        id: learningPackId,
+        publicationStatus: 'published',
+        publishedAtUtc: now,
+        updatedAtUtc: now,
+      };
     });
   }
 
