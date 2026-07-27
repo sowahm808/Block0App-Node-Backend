@@ -592,7 +592,6 @@ describe('MindUnlocking API', () => {
       '/mentor/support-requests',
       '/admin/challenges',
       '/admin/cohorts',
-      '/admin/learning-packs',
       '/admin/content-review',
       '/admin/reports',
       '/admin/audit',
@@ -610,6 +609,29 @@ describe('MindUnlocking API', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().data).toBeTruthy();
     }
+
+    const anonymousAdminPacks = await app.inject('/api/v1/admin/learning-packs');
+    expect(anonymousAdminPacks.statusCode).toBe(401);
+    const scholarAdminPacks = await app.inject({
+      url: '/api/v1/admin/learning-packs',
+      headers: { authorization: scholarAuthorization },
+    });
+    expect(scholarAdminPacks.statusCode).toBe(403);
+
+    users.data.set('catalog-admin', {
+      uid: 'catalog-admin',
+      email: 'catalog-admin@example.com',
+      roles: ['Administrator'],
+      permissions: ['content.read'],
+      status: 'Active',
+    });
+    const catalogAdminAuthorization = `Bearer ${token({ uid: 'catalog-admin', email: 'catalog-admin@example.com', email_verified: true })}`;
+    const adminPacks = await app.inject({
+      url: '/api/v1/admin/learning-packs?sort=title',
+      headers: { authorization: catalogAdminAuthorization },
+    });
+    expect(adminPacks.statusCode).toBe(200);
+    expect(adminPacks.json().items).toEqual(expect.any(Array));
 
     const teams = await app.inject({
       url: '/api/v1/teams',
@@ -653,6 +675,23 @@ describe('MindUnlocking API', () => {
     });
     expect(learningPacks.statusCode).toBe(200);
     expect(learningPacks.json()).toEqual(expect.any(Array));
+
+    users.data.set('catalog-mentor', {
+      uid: 'catalog-mentor',
+      email: 'mentor@example.com',
+      roles: ['Mentor'],
+      permissions: [],
+      status: 'Active',
+    });
+    const mentorPacks = await app.inject({
+      url: '/api/v1/learning-packs',
+      headers: {
+        authorization: `Bearer ${token({ uid: 'catalog-mentor', email: 'mentor@example.com', email_verified: true })}`,
+      },
+    });
+    expect(mentorPacks.statusCode).toBe(200);
+    expect(mentorPacks.json()).toEqual(expect.any(Array));
+    expect(mentorPacks.json().length).toBeGreaterThan(0);
 
     const scholarAccess = await svc.signAccessToken('seed-scholar', 'scholar@example.com', [
       'scholar:access',

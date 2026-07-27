@@ -87,6 +87,17 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     }
   };
 
+  const authenticatedRoles = (request: any) =>
+    new Set([request.user?.role, ...(request.user?.roles ?? [])].filter(Boolean));
+
+  const requireAdministrator = async (request: any) => {
+    await requireAuth(request);
+    const roles = authenticatedRoles(request);
+    if (!roles.has('Administrator') && !roles.has('SuperAdministrator')) {
+      throw new ForbiddenError('Administrator access is required');
+    }
+  };
+
   const sensitiveContentPattern =
     /\b(answer|answer selection|score|percentage|ranking|rank|confidence|weakness|missed objective|remediation|mentor note|private support|support description)\b/i;
 
@@ -622,16 +633,24 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get(
     '/learning-packs',
-    { preHandler: authService ? requireScholarAccess : undefined },
-    async (request) => learning.listLearningPacks(request.user?.uid, request.query as any),
+    { preHandler: authService ? requireAuth : undefined },
+    async (request) => {
+      const isScholar = authenticatedRoles(request).has('Scholar');
+      return learning.listLearningPacks(request.user?.uid, request.query as any, {
+        catalog: !isScholar,
+      });
+    },
   );
 
   app.get(
     '/learning-packs/:packId',
-    { preHandler: authService ? requireScholarAccess : undefined },
+    { preHandler: authService ? requireAuth : undefined },
     async (request) => {
       const { packId } = request.params as { packId: string };
-      const detail = await learning.getLearningPackDetail(request.user?.uid, packId);
+      const isScholar = authenticatedRoles(request).has('Scholar');
+      const detail = await learning.getLearningPackDetail(request.user?.uid, packId, {
+        catalog: !isScholar,
+      });
       if (detail === 'forbidden') throw new ForbiddenError('Learning pack is not visible');
       if (!detail) throw new NotFoundError('Learning pack not found');
       return detail;
@@ -892,7 +911,16 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/admin/cohorts', async () => ({ data: await learning.listTeams() }));
 
-  app.get('/admin/learning-packs', async () => ({ data: await learning.listLearningPacks() }));
+  app.get(
+    '/admin/learning-packs',
+    { preHandler: authService ? requireAdministrator : undefined },
+    async (request) => ({
+      items: await learning.listLearningPacks(undefined, request.query as any, {
+        catalog: true,
+        includeDrafts: true,
+      }),
+    }),
+  );
 
   app.get('/admin/content-review', async () => ({ data: await learning.listReviewContent() }));
 
