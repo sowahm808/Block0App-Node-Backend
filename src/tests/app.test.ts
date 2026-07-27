@@ -762,7 +762,19 @@ describe('MindUnlocking API', () => {
       (await app.inject({ url: '/api/v1/learning-packs', headers: learningPackHeaders })).json(),
     );
 
-    const reviewContent = await app.inject('/api/v1/review/content');
+    users.data.set('queue-reviewer', {
+      uid: 'queue-reviewer',
+      roles: ['ContentReviewer'],
+      permissions: ['content.read', 'content.review'],
+      status: 'Active',
+    });
+    const queueAccess = await svc.signAccessToken('queue-reviewer', 'queue@example.com', [
+      'content.read',
+    ]);
+    const reviewContent = await app.inject({
+      url: '/api/v1/review/content',
+      headers: { authorization: `Bearer ${queueAccess.token}` },
+    });
     expect(reviewContent.statusCode).toBe(200);
     expect(reviewContent.json().data[0]).toMatchObject({
       id: 'review-medical-exam-foundations',
@@ -816,7 +828,14 @@ describe('MindUnlocking API', () => {
       },
       readiness: { ready: async () => ({ status: 'ready' }) },
     });
+    users.data.set('reviewer', {
+      uid: 'reviewer',
+      roles: ['ContentReviewer'],
+      permissions: ['content.read', 'content.review'],
+      status: 'Active',
+    });
     const reviewer = await svc.signAccessToken('reviewer', 'reviewer@example.com', [
+      'content.read',
       'content.review',
     ]);
 

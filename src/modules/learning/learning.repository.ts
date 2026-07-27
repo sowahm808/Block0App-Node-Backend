@@ -2146,7 +2146,8 @@ export class LearningRepository {
                 (answer: string) =>
                   answer.toLowerCase() === String(body.shortAnswer).trim().toLowerCase(),
               )
-            : explanation.correctChoiceId === body.choiceId;
+            : String(explanation.correctChoiceId).toLowerCase() ===
+              String(body.choiceId).toLowerCase();
     const submittedAtUtc =
       body.submittedAtUtc && !Number.isNaN(new Date(body.submittedAtUtc).getTime())
         ? new Date(body.submittedAtUtc).toISOString()
@@ -2695,30 +2696,31 @@ export class LearningRepository {
 
   async listReviewContent() {
     const snapshot = await this.db.collection('contentReviews').get();
-    const reviews = snapshot.docs.map((doc) => doc.data());
-    const sourceReviews = reviews.length ? reviews : sampleContentReviews;
-    return Promise.all(
-      sourceReviews.map(async (review: any) => {
-        const content = await this.getReviewEntity(review.entityType, review.entityId);
-        return {
-          ...review,
-          content,
-          title: content?.title ?? content?.stem ?? review.entityId,
-        };
-      }),
+    const records = await Promise.all(
+      snapshot.docs.map((doc) => this.mapContentReview(doc.id, doc.data())),
     );
+    return records.filter((record) => record !== null);
   }
 
-  /** Fetches by the review document key, never by the reviewed entity's ID. */
-  async findContentReviewById(reviewId: string) {
-    const document = await this.db.collection('contentReviews').doc(reviewId).get();
-    const review = document.exists ? document.data() : null;
-    if (!review) return null;
-
+  private async mapContentReview(reviewId: string, review: any) {
     const entity = await this.getReviewEntity(String(review.entityType), String(review.entityId));
     if (!entity) return null;
     const content: Record<string, unknown> = {};
-    for (const field of ['id', 'title', 'description', 'stem', 'choices', 'objectives', 'tags']) {
+    for (const field of [
+      'id',
+      'externalId',
+      'learningPackId',
+      'capsuleId',
+      'type',
+      'difficulty',
+      'sequence',
+      'title',
+      'description',
+      'stem',
+      'choices',
+      'objectives',
+      'tags',
+    ]) {
       if (entity[field] !== undefined) content[field] = entity[field];
     }
     if (review.entityType === 'question') {
@@ -2737,18 +2739,29 @@ export class LearningRepository {
         );
       }
     }
+    const importAudit = review.importAudit ?? entity.importAudit;
     return {
       id: String(review.id ?? reviewId),
       entityType: String(review.entityType),
       entityId: String(review.entityId),
       status: String(review.status),
-      title: String(entity.title ?? entity.stem ?? review.entityId),
-      content,
-      notes: typeof review.notes === 'string' ? review.notes : '',
+      title: String(review.title ?? entity.title ?? entity.stem ?? review.entityId),
+      notes: typeof review.notes === 'string' ? review.notes : null,
       reviewerId: typeof review.reviewerId === 'string' ? review.reviewerId : null,
       reviewedAtUtc: typeof review.reviewedAtUtc === 'string' ? review.reviewedAtUtc : null,
+      content,
+      ...(importAudit ? { importAudit } : {}),
       version: Number(review.version ?? 0),
     };
+  }
+
+  /** Fetches by the review document key, never by the reviewed entity's ID. */
+  async findContentReviewById(reviewId: string) {
+    const document = await this.db.collection('contentReviews').doc(reviewId).get();
+    const review = document.exists ? document.data() : null;
+    if (!review) return null;
+
+    return this.mapContentReview(reviewId, review);
   }
 
   /** Atomically records a review decision without modifying the reviewed entity. */

@@ -41,6 +41,21 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     }
   };
 
+  const requireContentReviewAccess =
+    (permission: 'content.read' | 'content.review') => async (request: any) => {
+      await requireAuth(request);
+      const roles = new Set([request.user?.role, ...(request.user?.roles ?? [])]);
+      const permissions: string[] = request.user?.permissions ?? [];
+      const hasReviewRole = ['ContentReviewer', 'Administrator', 'SuperAdministrator'].some(
+        (role) => roles.has(role),
+      );
+      if (!hasReviewRole || (!permissions.includes('*') && !permissions.includes(permission))) {
+        throw new ForbiddenError(
+          `A content-review role and the ${permission} permission are required`,
+        );
+      }
+    };
+
   const requireAdminOrReviewer = async (request: any) => {
     await requireAuth(request);
     const permissions = request.user?.permissions ?? [];
@@ -761,12 +776,22 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     data: 'listReviewHistory' in learning ? await (learning as any).listReviewHistory() : [],
   }));
 
-  app.get('/review/content', async () => ({ data: await learning.listReviewContent() }));
+  app.get(
+    '/review/content',
+    {
+      preHandler: requireContentReviewAccess('content.read'),
+      schema: { tags: ['review'], security: [{ bearerAuth: [] }] },
+    },
+    async () => {
+      const data = await learning.listReviewContent();
+      return { data, total: data.length, nextCursor: null };
+    },
+  );
 
   app.get(
     '/review/content/:reviewId',
     {
-      preHandler: requireAdminPermission('content.review'),
+      preHandler: requireContentReviewAccess('content.read'),
       schema: {
         params: zodToJsonSchema(
           z.object({ reviewId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/) }),
@@ -811,7 +836,7 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
             throw new ValidationAppError({ notes: ['Reviewer notes must be a string.'] });
           }
         },
-        preHandler: requireAdminPermission('content.review'),
+        preHandler: requireContentReviewAccess('content.review'),
         schema: {
           params: zodToJsonSchema(opaqueReviewIdSchema),
           body: zodToJsonSchema(reviewDecisionBodySchema),
@@ -852,7 +877,7 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
           throw new ConflictError('The content review was updated by another reviewer.');
         }
         if (result.outcome === 'invalid_transition') {
-          throw new UnprocessableEntityError('The content review status transition is invalid.');
+          throw new ConflictError('The content review status transition is invalid.');
         }
         return { data: result.review };
       },

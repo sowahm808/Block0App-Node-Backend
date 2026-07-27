@@ -89,7 +89,12 @@ export function validateLearningPackImport(payload: LearningPackImportPayload): 
       const explanation = question.explanation;
       if (!explanation?.correctChoiceId)
         errors.push(`question ${question.externalId} correctChoiceId is required`);
-      if (explanation?.correctChoiceId && !choiceIds.has(explanation.correctChoiceId))
+      if (
+        explanation?.correctChoiceId &&
+        ![...choiceIds].some(
+          (choiceId) => choiceId.toLowerCase() === explanation.correctChoiceId.toLowerCase(),
+        )
+      )
         errors.push(`question ${question.externalId} correctChoiceId must match a choice id`);
       if (!explanation?.correctRationale)
         errors.push(`question ${question.externalId} correctRationale is required`);
