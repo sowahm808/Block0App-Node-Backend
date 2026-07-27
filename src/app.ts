@@ -32,6 +32,8 @@ import {
 import { learningPackImportRoutes } from './modules/learning/import.routes.js';
 import { CohortsRepository } from './modules/cohorts/cohorts.repository.js';
 import { cohortRoutes } from './modules/cohorts/cohorts.routes.js';
+import { ReportsRepository } from './modules/reports/reports.repository.js';
+import { reportsRoutes } from './modules/reports/reports.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -95,6 +97,31 @@ export async function buildApp(overrides?: any) {
           },
         }
       : new CohortsRepository(getFirebase().db));
+  const reports =
+    overrides?.reports ??
+    (overrides
+      ? {
+          async overview() {
+            return {
+              counts: {},
+              rates: {},
+              completionTrend: [],
+              assignmentStatus: [],
+              challengeOptions: [],
+              cohortOptions: [],
+              updatedAtUtc: new Date().toISOString(),
+            };
+          },
+          async list() {
+            return {
+              items: [],
+              total: 0,
+              nextCursor: null,
+              updatedAtUtc: new Date().toISOString(),
+            };
+          },
+        }
+      : new ReportsRepository(getFirebase().db));
   const readiness = overrides?.readiness ?? new ReadinessService(getFirebase().db);
   const notifications =
     overrides?.notifications ??
@@ -825,6 +852,7 @@ export async function buildApp(overrides?: any) {
       await v1.register(readinessRoutes, { prefix: '/readiness', readiness, authService } as any);
       await v1.register(learningRoutes, { learning, authService, users } as any);
       await v1.register(adminRoutes, { learning, authService } as any);
+      await v1.register(reportsRoutes, { reports, authService });
       await v1.register(cohortRoutes, { cohorts, authService } as any);
       if (imports) await v1.register(learningPackImportRoutes, { imports, authService } as any);
       await v1.register(notificationsRoutes, {
