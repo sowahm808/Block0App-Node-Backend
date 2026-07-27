@@ -1170,10 +1170,6 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get('/admin/reports', async () => ({ data: await learning.getDashboard() }));
 
-  app.get('/admin/audit', async () => ({
-    data: 'listReviewHistory' in learning ? await (learning as any).listReviewHistory() : [],
-  }));
-
   app.get(
     '/admin/users',
     { preHandler: authService ? requireAdminPermission('admin.users.read') : undefined },

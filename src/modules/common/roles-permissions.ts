@@ -62,6 +62,7 @@ export const rolePermissions: Record<AppRole, string[]> = {
     'raffles.manage',
     'certificates.manage',
     'audit.read',
+    'audit.export',
     'notification.manage',
     'admin.announcements.manage',
     'admin.enrollments.manage',
