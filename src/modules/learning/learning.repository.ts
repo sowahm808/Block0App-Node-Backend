@@ -251,6 +251,13 @@ type LearningPackListQuery = {
   sort?: string;
 };
 
+type LearningPackVisibility = {
+  /** Return the published catalog without requiring a learner assignment. */
+  catalog?: boolean;
+  /** Administrative catalogs may include content that has not been published. */
+  includeDrafts?: boolean;
+};
+
 const normalizeFilterValue = (value: unknown) =>
   String(value ?? '')
     .trim()
@@ -1361,7 +1368,11 @@ export class LearningRepository {
     return rows.length ? rows : fallback;
   }
 
-  async listLearningPacks(scholarId?: string, query: LearningPackListQuery = {}) {
+  async listLearningPacks(
+    scholarId?: string,
+    query: LearningPackListQuery = {},
+    visibility: LearningPackVisibility = {},
+  ) {
     const [allPacks, capsules, questions, capsuleAttempts, questionAttempts, assignments] =
       await Promise.all([
         this.listCollectionOrSeed('learningPacks', sampleLearningPacks),
@@ -1379,11 +1390,12 @@ export class LearningRepository {
         .map((assignment: any) => assignment.learningPackId),
     );
 
-    const packs = allPacks.filter(
-      (pack: any) =>
-        pack.status === 'published' &&
-        (!hasAssignments || visiblePackIds.has(pack.id) || !scholarId),
-    );
+    const packs = allPacks.filter((pack: any) => {
+      const hasCatalogVisibility = visibility.includeDrafts || pack.status === 'published';
+      const hasAssignmentVisibility =
+        visibility.catalog || !scholarId || !hasAssignments || visiblePackIds.has(pack.id);
+      return hasCatalogVisibility && hasAssignmentVisibility;
+    });
 
     const mapped = packs.map((pack: any, index: number) => {
       const packCapsules = capsules.filter((capsule: any) => capsule.learningPackId === pack.id);
@@ -1558,14 +1570,18 @@ export class LearningRepository {
       });
   }
 
-  async getLearningPackDetail(scholarId: string | undefined, packId: string) {
+  async getLearningPackDetail(
+    scholarId: string | undefined,
+    packId: string,
+    visibility: LearningPackVisibility = {},
+  ) {
     const allPacks = await this.listCollectionOrSeed('learningPacks', sampleLearningPacks);
     const packExists = allPacks.some(
       (pack: any) => pack.id === packId || pack.externalId === packId || pack.slug === packId,
     );
     if (!packExists) return null;
 
-    const visiblePacks = await this.listLearningPacks(scholarId);
+    const visiblePacks = await this.listLearningPacks(scholarId, {}, visibility);
     const listItem = (visiblePacks as any[]).find(
       (pack: any) => pack.id === packId || pack.externalId === packId,
     );
