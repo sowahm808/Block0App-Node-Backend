@@ -727,7 +727,7 @@ export async function buildApp(overrides?: any) {
                 };
           },
         }
-      : new LearningRepository(getFirebase().db));
+      : new LearningRepository(getFirebase().db, env.FIREBASE_USERS_COLLECTION));
   if (overrides?.seedLearning !== false && typeof learning.seedAll === 'function') {
     await learning.seedAll();
   }
