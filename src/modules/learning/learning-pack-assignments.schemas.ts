@@ -4,14 +4,14 @@ const optionalUtcDateTime = z.string().datetime({ offset: true }).optional();
 
 export const learningPackAssignmentSchema = z
   .object({
-    learningPackId: z.string().trim().min(1).max(200),
+    learningPackId: z.string().trim().min(1).max(200).optional(),
     scholarIds: z.array(z.string().trim().min(1).max(200)).min(1).max(100),
     cohortId: z.string().trim().min(1).max(200).optional(),
     teamId: z.string().trim().min(1).max(200).optional(),
     startAtUtc: optionalUtcDateTime,
     dueAtUtc: optionalUtcDateTime,
     notes: z.string().trim().max(2000).optional(),
-    idempotencyKey: z.string().trim().min(8).max(200),
+    idempotencyKey: z.string().trim().min(8).max(200).optional(),
   })
   .strict()
   .superRefine((value, context) => {

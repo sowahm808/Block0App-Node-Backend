@@ -99,6 +99,13 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
     }
   };
 
+  const requireLearningPackPermission = (permission: string) => async (request: any) => {
+    await requireAdministrator(request);
+    const permissions = request.user?.permissions ?? [];
+    if (!permissions.includes('*') && !permissions.includes(permission))
+      throw new ForbiddenError(`Missing permission: ${permission}`);
+  };
+
   const sensitiveContentPattern =
     /\b(answer|answer selection|score|percentage|ranking|rank|confidence|weakness|missed objective|remediation|mentor note|private support|support description)\b/i;
 
@@ -914,32 +921,56 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
 
   app.get(
     '/admin/learning-packs',
-    { preHandler: authService ? requireAdministrator : undefined },
-    async (request) => ({
-      items: await learning.listLearningPacks(undefined, request.query as any, {
-        catalog: true,
-        includeDrafts: true,
-      }),
-    }),
+    { preHandler: authService ? async (request) => {
+      await requireAdministrator(request);
+      const permissions = request.user?.permissions ?? [];
+      if (!permissions.includes('*') && !permissions.includes('admin.learning-packs.read') &&
+          !permissions.includes('content.read')) throw new ForbiddenError('Missing permission: admin.learning-packs.read');
+    } : undefined },
+    async (request) => {
+      try {
+        if ('listAdminLearningPacks' in learning)
+          return await learning.listAdminLearningPacks(request.query as any);
+        const items = await (learning as any).listLearningPacks(undefined, request.query as any, {
+          catalog: true, includeDrafts: true,
+        });
+        return { items, total: items.length, nextCursor: null };
+      }
+      catch (error) {
+        if ((error as Error).message === 'INVALID_CATALOG_CURSOR')
+          throw new ValidationAppError({ cursor: ['Cursor is invalid or no longer available.'] });
+        throw error;
+      }
+    },
   );
+
+  app.get('/admin/learning-packs/:learningPackId', {
+    preHandler: authService ? requireLearningPackPermission('admin.learning-packs.read') : undefined,
+  }, async (request) => {
+    const { learningPackId } = request.params as { learningPackId: string };
+    const pack = await learning.getAdminLearningPack(learningPackId);
+    if (!pack) throw new NotFoundError('Learning pack not found');
+    return pack;
+  });
 
   app.post(
     '/admin/learning-packs/:learningPackId/assignments',
     {
-      preHandler: authService ? requireAdminPermission('learning_packs.assign') : undefined,
+      preHandler: authService ? requireLearningPackPermission('admin.learning-packs.assign') : undefined,
       schema: { body: zodToJsonSchema(learningPackAssignmentSchema) },
     },
     async (request, reply) => {
       const { learningPackId } = request.params as { learningPackId: string };
-      const input = learningPackAssignmentSchema.parse(request.body);
-      if (input.learningPackId !== learningPackId) {
+      const parsed = learningPackAssignmentSchema.parse(request.body);
+      if (parsed.learningPackId && parsed.learningPackId !== learningPackId) {
         throw new ValidationAppError({
           learningPackId: ['Body learningPackId must match the route parameter.'],
         });
       }
+      const input = { ...parsed, learningPackId };
       try {
         const result = await (learning as any).assignLearningPack(input, request.user!.uid);
-        return reply.status(201).send({ data: result });
+        return reply.status(200).send({ assignedCount: result.created, skippedCount: result.skipped });
       } catch (error) {
         if ((error as Error).message === 'LEARNING_PACK_NOT_FOUND') {
           throw new NotFoundError('Learning pack not found');
@@ -947,10 +978,27 @@ export async function learningRoutes(app: FastifyInstance, opts: LearningRoutesO
         if ((error as Error).message === 'IDEMPOTENCY_KEY_REUSED') {
           throw new ConflictError('Idempotency key was already used for a different request.');
         }
+        if ((error as Error).message === 'LEARNING_PACK_NOT_ASSIGNABLE')
+          throw new UnprocessableEntityError('Learning pack is not assignable.');
+        if ((error as Error).message === 'INVALID_SCHOLARS')
+          throw new ValidationAppError((error as Error & { errors?: unknown }).errors);
         throw error;
       }
     },
   );
+
+  app.post('/admin/learning-packs/:learningPackId/publish', {
+    preHandler: authService ? requireLearningPackPermission('admin.learning-packs.publish') : undefined,
+  }, async (request) => {
+    const { learningPackId } = request.params as { learningPackId: string };
+    try { return await learning.publishLearningPack(learningPackId, request.user!.uid); }
+    catch (error) {
+      if ((error as Error).message === 'LEARNING_PACK_NOT_FOUND') throw new NotFoundError('Learning pack not found');
+      if ((error as Error).message === 'LEARNING_PACK_REVIEW_INCOMPLETE')
+        throw new UnprocessableEntityError('Learning pack review must be approved before publication.');
+      throw error;
+    }
+  });
 
   app.get('/admin/content-review', async () => ({ data: await learning.listReviewContent() }));
 

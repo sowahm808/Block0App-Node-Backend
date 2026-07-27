@@ -262,6 +262,30 @@ type LearningPackVisibility = {
   includeDrafts?: boolean;
 };
 
+export type AdminLearningPackQuery = {
+  query?: string;
+  publicationStatus?: 'draft' | 'in_review' | 'published' | 'archived';
+  cursor?: string;
+  limit?: number | string;
+  sort?: string;
+};
+
+const publicationStatuses = new Set(['draft', 'in_review', 'published', 'archived']);
+const publicationStatusOf = (pack: any) => {
+  const value = normalizeFilterValue(pack.publicationStatus ?? pack.status ?? 'draft');
+  return publicationStatuses.has(value) ? value : 'draft';
+};
+const adminPackCursor = (sortValue: unknown, id: string) =>
+  Buffer.from(JSON.stringify([sortValue ?? null, id]), 'utf8').toString('base64url');
+const parseAdminPackCursor = (cursor?: string): [unknown, string] | null => {
+  if (!cursor) return null;
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    return Array.isArray(value) && value.length === 2 && typeof value[1] === 'string'
+      ? [value[0], value[1]] : null;
+  } catch { return null; }
+};
+
 const normalizeFilterValue = (value: unknown) =>
   String(value ?? '')
     .trim()
@@ -315,10 +339,14 @@ export class LearningRepository {
     input: LearningPackAssignmentRequest,
     actorId: string,
   ): Promise<LearningPackAssignmentResult> {
-    const requestHash = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
+    if (!input.learningPackId) throw new Error('LEARNING_PACK_NOT_FOUND');
+    const learningPackId = input.learningPackId;
+    const idempotencyKey = input.idempotencyKey ?? crypto.createHash('sha256')
+      .update(`${learningPackId}:${[...input.scholarIds].sort().join(',')}`).digest('hex');
+    const requestHash = crypto.createHash('sha256').update(JSON.stringify({ ...input, idempotencyKey })).digest('hex');
     const idempotencyId = crypto
       .createHash('sha256')
-      .update(`${actorId}:${input.idempotencyKey}`)
+      .update(`${actorId}:${idempotencyKey}`)
       .digest('hex');
     const idempotencyRef = this.db.collection('learningPackAssignmentRequests').doc(idempotencyId);
 
@@ -332,9 +360,12 @@ export class LearningRepository {
         return prior.result as LearningPackAssignmentResult;
       }
 
-      const packRef = this.db.collection('learningPacks').doc(input.learningPackId);
+      const packRef = this.db.collection('learningPacks').doc(learningPackId);
       const pack = await transaction.get(packRef);
       if (!pack.exists) throw new Error('LEARNING_PACK_NOT_FOUND');
+      if (publicationStatusOf(pack.data()) === 'archived' || (pack.data() as any)?.assignable === false) {
+        throw new Error('LEARNING_PACK_NOT_ASSIGNABLE');
+      }
 
       const userRefs = input.scholarIds.map((scholarId) =>
         this.db.collection(this.usersCollectionName).doc(scholarId),
@@ -343,13 +374,27 @@ export class LearningRepository {
       const assignmentRefs = input.scholarIds.map((scholarId) => {
         const assignmentId = crypto
           .createHash('sha256')
-          .update(`${input.learningPackId}:${scholarId}`)
+          .update(`${learningPackId}:${scholarId}`)
           .digest('hex');
         return this.db.collection('assignments').doc(assignmentId);
       });
       const existingAssignments = await Promise.all(
         assignmentRefs.map((ref) => transaction.get(ref)),
       );
+      const invalidScholars = input.scholarIds.flatMap((scholarId, index) => {
+        const user = userDocuments[index];
+        const data = user.data() as any;
+        if (!user.exists || !Array.isArray(data?.roles) || !data.roles.includes('Scholar'))
+          return [{ scholarId, message: 'Eligible scholar not found.' }];
+        if (['Suspended', 'Disabled', 'Deleted'].includes(data.status))
+          return [{ scholarId, message: 'Scholar is not active.' }];
+        return [];
+      });
+      if (invalidScholars.length) {
+        const error = new Error('INVALID_SCHOLARS') as Error & { errors: unknown };
+        error.errors = { scholarIds: invalidScholars };
+        throw error;
+      }
       const now = new Date().toISOString();
       const assignments: LearningPackAssignmentResult['assignments'] = [];
       const errors: NonNullable<LearningPackAssignmentResult['errors']> = [];
@@ -390,7 +435,7 @@ export class LearningRepository {
 
         const assignment = removeUndefinedProperties({
           id: assignmentId,
-          learningPackId: input.learningPackId,
+          learningPackId,
           scholarId,
           targetId: scholarId,
           targetType: 'scholar',
@@ -410,7 +455,7 @@ export class LearningRepository {
       }
 
       const result: LearningPackAssignmentResult = {
-        learningPackId: input.learningPackId,
+        learningPackId,
         requested: input.scholarIds.length,
         created,
         skipped,
@@ -421,11 +466,15 @@ export class LearningRepository {
       transaction.create(idempotencyRef, {
         id: idempotencyId,
         actorId,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey,
         requestHash,
         result,
         createdAtUtc: now,
       });
+      const auditRef = this.db.collection('auditLogs').doc();
+      transaction.create(auditRef, { id: auditRef.id, action: 'learning_pack.assigned', actorId,
+        learningPackId, scholarIds: input.scholarIds,
+        result: { assignedCount: created, skippedCount: skipped }, createdAtUtc: now });
       return result;
     });
   }
@@ -1492,6 +1541,96 @@ export class LearningRepository {
     const snapshot = await this.db.collection(collectionName).get();
     const rows = snapshot.docs.map((doc) => doc.data() as any);
     return rows.length ? rows : fallback;
+  }
+
+  async listAdminLearningPacks(query: AdminLearningPackQuery = {}) {
+    const [packs, capsules, questions, assignments] = await Promise.all([
+      this.listCollectionOrSeed('learningPacks', sampleLearningPacks),
+      this.listCollectionOrSeed('capsules', sampleCapsules),
+      this.listCollectionOrSeed('questions', sampleQuestions),
+      this.listCollectionOrSeed('assignments', sampleAssignments),
+    ]);
+    const search = String(query.query ?? '').trim().toLowerCase();
+    const requestedStatus = query.publicationStatus
+      ? normalizeFilterValue(query.publicationStatus) : undefined;
+    const rows = packs.map((pack: any) => {
+      const packCapsules = capsules.filter((item: any) => item.learningPackId === pack.id);
+      const capsuleIds = new Set(packCapsules.map((item: any) => item.id));
+      const packQuestions = questions.filter((item: any) =>
+        item.learningPackId === pack.id || capsuleIds.has(item.capsuleId));
+      return {
+        id: String(pack.id),
+        externalId: String(pack.externalId ?? pack.slug ?? pack.id),
+        code: String(pack.code ?? (pack.dayNumber ? `LP${String(pack.dayNumber).padStart(2, '0')}` : pack.id)),
+        title: String(pack.title ?? ''),
+        description: String(pack.description ?? ''),
+        topic: String(pack.topic ?? pack.subject ?? ''),
+        audience: String(pack.audience ?? pack.level ?? ''),
+        publicationStatus: publicationStatusOf(pack),
+        reviewStatus: String(pack.reviewStatus ?? 'pending'),
+        capsuleCount: Number(pack.capsuleCount ?? packCapsules.length) || 0,
+        questionCount: Number(pack.questionCount ?? packQuestions.length) || 0,
+        assignmentCount: new Set(assignments.filter((item: any) => item.learningPackId === pack.id)
+          .map((item: any) => item.scholarId ?? item.targetId)).size,
+        updatedAtUtc: String(pack.updatedAtUtc ?? pack.updatedAt ?? pack.createdAtUtc ?? new Date(0).toISOString()),
+      };
+    }).filter((pack) => {
+      const searchable = `${pack.title} ${pack.code} ${pack.externalId} ${pack.description} ${pack.topic}`.toLowerCase();
+      return (!search || searchable.includes(search)) &&
+        (!requestedStatus || pack.publicationStatus === requestedStatus);
+    });
+    const [field, requestedDirection] = String(query.sort ?? 'updatedAtUtc:desc').split(':');
+    const sortField = (['title', 'code', 'publicationStatus', 'updatedAtUtc'].includes(field)
+      ? field : 'updatedAtUtc') as keyof (typeof rows)[number];
+    const direction = requestedDirection === 'asc' || (!requestedDirection && field === 'title') ? 1 : -1;
+    rows.sort((a, b) => String(a[sortField]).localeCompare(String(b[sortField])) * direction || a.id.localeCompare(b.id));
+    const cursor = parseAdminPackCursor(query.cursor);
+    if (query.cursor && !cursor) throw new Error('INVALID_CATALOG_CURSOR');
+    const start = cursor ? rows.findIndex((row) => row.id === cursor[1] && row[sortField] === cursor[0]) + 1 : 0;
+    if (cursor && start === 0) throw new Error('INVALID_CATALOG_CURSOR');
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 25));
+    const items = rows.slice(start, start + limit);
+    const last = items.at(-1);
+    return { items, total: rows.length, nextCursor: start + items.length < rows.length && last
+      ? adminPackCursor(last[sortField], last.id) : null };
+  }
+
+  async getAdminLearningPack(learningPackId: string) {
+    const catalog = await this.listAdminLearningPacks({ limit: 100 });
+    const record = catalog.items.find((item) => item.id === learningPackId);
+    if (!record) return null;
+    const [packDocument, capsules, reviews] = await Promise.all([
+      this.db.collection('learningPacks').doc(learningPackId).get(),
+      this.listCollectionOrSeed('capsules', sampleCapsules),
+      this.listCollectionOrSeed('contentReviews', sampleContentReviews),
+    ]);
+    const pack = packDocument.exists ? packDocument.data() as any
+      : sampleLearningPacks.find((item: any) => item.id === learningPackId) as any;
+    return { ...record,
+      objectives: pack?.objectives ?? pack?.learningObjectives ?? [],
+      capsules: capsules.filter((item: any) => item.learningPackId === learningPackId)
+        .map((item: any) => ({ id: item.id, title: item.title, description: item.description ?? '', questionCount: item.questionCount ?? 0 })),
+      reviewHistory: reviews.filter((item: any) => item.learningPackId === learningPackId),
+      version: { number: Number(pack?.version ?? 1), contentFingerprint: pack?.contentFingerprint ?? null,
+        createdAtUtc: pack?.createdAtUtc ?? null, updatedAtUtc: record.updatedAtUtc },
+    };
+  }
+
+  async publishLearningPack(learningPackId: string, actorId: string) {
+    const packRef = this.db.collection('learningPacks').doc(learningPackId);
+    return this.db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(packRef);
+      if (!snapshot.exists) throw new Error('LEARNING_PACK_NOT_FOUND');
+      const pack = snapshot.data() as any;
+      if (pack.reviewStatus !== 'approved') throw new Error('LEARNING_PACK_REVIEW_INCOMPLETE');
+      const now = new Date().toISOString();
+      transaction.update(packRef, { publicationStatus: 'published', status: 'published', publishedAtUtc: now,
+        updatedAtUtc: now, publishedBy: actorId });
+      const auditRef = this.db.collection('auditLogs').doc();
+      transaction.create(auditRef, { id: auditRef.id, action: 'learning_pack.published', actorId,
+        learningPackId, createdAtUtc: now });
+      return { ...pack, id: learningPackId, publicationStatus: 'published', publishedAtUtc: now, updatedAtUtc: now };
+    });
   }
 
   async listLearningPacks(
