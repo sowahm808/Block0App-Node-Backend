@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 
-const reviewer = { uid: 'reviewer-1', permissions: ['content.review'] };
+const reviewer = {
+  uid: 'reviewer-1',
+  roles: ['ContentReviewer'],
+  permissions: ['content.read', 'content.review'],
+};
 const authService = {
   async verifyAccessToken(value: string) {
     if (value === 'reviewer') return reviewer;
@@ -100,6 +104,41 @@ describe('content review decisions', () => {
       readiness: { ready: async () => ({ status: 'ready' }) },
     });
   }
+
+  it('returns populated and empty list envelopes only to authorized reviewers', async () => {
+    const review = baseReview();
+    learning.reviews.set(review.id, review);
+    const server = await app();
+    const headers = { authorization: 'Bearer reviewer' };
+
+    const populated = await server.inject({ url: '/api/v1/review/content', headers });
+    expect(populated.statusCode).toBe(200);
+    expect(populated.json()).toEqual({ data: [review], total: 1, nextCursor: null });
+    expect(new Set(populated.json().data.map((item: any) => item.id)).size).toBe(1);
+    expect(populated.json().data[0]).toMatchObject({
+      id: review.id,
+      entityType: 'question',
+      entityId: review.entityId,
+      status: 'draft',
+      content: expect.any(Object),
+    });
+
+    learning.reviews.clear();
+    expect((await server.inject({ url: '/api/v1/review/content', headers })).json()).toEqual({
+      data: [],
+      total: 0,
+      nextCursor: null,
+    });
+    expect((await server.inject('/api/v1/review/content')).statusCode).toBe(401);
+    expect(
+      (
+        await server.inject({
+          url: '/api/v1/review/content',
+          headers: { authorization: 'Bearer learner' },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
 
   it.each([
     ['approve', 'approved', ''],
@@ -228,6 +267,6 @@ describe('content review decisions', () => {
       headers,
       payload: { notes: 'No' },
     });
-    expect(finalTransition.statusCode).toBe(422);
+    expect(finalTransition.statusCode).toBe(409);
   });
 });

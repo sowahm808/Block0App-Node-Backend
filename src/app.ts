@@ -517,7 +517,9 @@ export async function buildApp(overrides?: any) {
             const explanation = seed.sampleQuestionExplanations[0] as any;
             return {
               selectedChoiceId: body.choiceId,
-              correct: explanation.correctChoiceId === body.choiceId,
+              correct:
+                String(explanation.correctChoiceId).toLowerCase() ===
+                String(body.choiceId).toLowerCase(),
               correctChoiceId: explanation.correctChoiceId,
               correctRationale: explanation.correctRationale,
               incorrectRationales: explanation.incorrectRationales,
@@ -683,7 +685,9 @@ export async function buildApp(overrides?: any) {
             return explanation
               ? {
                   selectedChoiceId: body.choiceId,
-                  correct: explanation.correctChoiceId === body.choiceId,
+                  correct:
+                    String(explanation.correctChoiceId).toLowerCase() ===
+                    String(body.choiceId).toLowerCase(),
                   correctChoiceId: explanation.correctChoiceId,
                   correctRationale: explanation.correctRationale,
                   incorrectRationales: explanation.incorrectRationales,
