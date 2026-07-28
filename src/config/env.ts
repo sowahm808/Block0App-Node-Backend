@@ -66,8 +66,6 @@ const schema = z
         'FIREBASE_PRIVATE_KEY',
         'FIREBASE_STORAGE_BUCKET',
         'ACCESS_TOKEN_SECRET',
-        'WHISPERWRAP_API_KEY',
-        'WHISPER_TOKEN_PEPPER',
       ] as const) {
         if (!value[key])
           ctx.addIssue({
@@ -125,7 +123,13 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
       '-----BEGIN PRIVATE KEY-----\nlocal-development-key\n-----END PRIVATE KEY-----',
     RATE_LIMIT_PER_MINUTE: parsed.RATE_LIMIT_PER_MINUTE ?? parsed.RATE_LIMIT_MAX,
     ACCESS_TOKEN_SECRET: parsed.ACCESS_TOKEN_SECRET ?? 'local-development-access-token-secret-32',
-    WHISPER_TOKEN_PEPPER: parsed.WHISPER_TOKEN_PEPPER ?? 'local-development-whisper-pepper-32',
+    // Reuse the required production application secret when a dedicated pepper
+    // has not been provisioned. This keeps existing deployments bootable while
+    // still ensuring consent tokens are protected by production-grade keying.
+    WHISPER_TOKEN_PEPPER:
+      parsed.WHISPER_TOKEN_PEPPER ??
+      parsed.ACCESS_TOKEN_SECRET ??
+      'local-development-whisper-pepper-32',
     corsOrigins,
     firebaseConfigured,
   };
