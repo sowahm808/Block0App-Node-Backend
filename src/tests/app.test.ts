@@ -154,6 +154,8 @@ describe('MindUnlocking API', () => {
     } as any);
 
     expect(defaultEnv.corsOrigins).toEqual(['http://localhost:4200', 'https://custom.example.com']);
+    expect(defaultEnv.WHISPERWRAP_API_KEY).toBeUndefined();
+    expect(defaultEnv.WHISPER_TOKEN_PEPPER).toBe(defaultEnv.ACCESS_TOKEN_SECRET);
   });
   it('validates register body and returns Problem Details', async () => {
     const app = await buildApp({
