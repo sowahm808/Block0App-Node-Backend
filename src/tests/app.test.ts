@@ -120,6 +120,8 @@ const prodEnv = loadEnv({
   FIREBASE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----',
   FIREBASE_STORAGE_BUCKET: 'prod-project.appspot.com',
   CORS_ALLOWED_ORIGINS: 'https://custom.example.com',
+  WHISPERWRAP_API_KEY: 'whisper-test-key',
+  WHISPER_TOKEN_PEPPER: 'whisper-test-pepper-at-least-32-bytes',
 } as any);
 
 describe('MindUnlocking API', () => {

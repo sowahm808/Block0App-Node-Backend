@@ -51,6 +51,12 @@ const schema = z
     ENABLE_SWAGGER: booleanFromEnv.default(true),
     ENABLE_AI_FEATURES: booleanFromEnv.default(true),
     ENABLE_SCHEDULED_JOBS: booleanFromEnv.default(true),
+    WHISPERWRAP_BASE_URL: z.string().url().default('https://whisperwrap-backend.onrender.com'),
+    WHISPERWRAP_API_KEY: z.string().min(1).optional(),
+    PUBLIC_APP_URL: z.string().url().default('http://localhost:4200'),
+    WHISPER_TOKEN_PEPPER: z.string().min(32).optional(),
+    WHISPER_AUDIO_BUCKET: z.string().min(1).default('block0-whispers'),
+    WHISPER_SEND_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV === 'production') {
@@ -60,6 +66,8 @@ const schema = z
         'FIREBASE_PRIVATE_KEY',
         'FIREBASE_STORAGE_BUCKET',
         'ACCESS_TOKEN_SECRET',
+        'WHISPERWRAP_API_KEY',
+        'WHISPER_TOKEN_PEPPER',
       ] as const) {
         if (!value[key])
           ctx.addIssue({
@@ -82,6 +90,7 @@ export type Env = z.infer<typeof schema> & {
   corsOrigins: string[];
   RATE_LIMIT_PER_MINUTE: number;
   ACCESS_TOKEN_SECRET: string;
+  WHISPER_TOKEN_PEPPER: string;
   firebaseConfigured: boolean;
 };
 
@@ -116,6 +125,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): Env {
       '-----BEGIN PRIVATE KEY-----\nlocal-development-key\n-----END PRIVATE KEY-----',
     RATE_LIMIT_PER_MINUTE: parsed.RATE_LIMIT_PER_MINUTE ?? parsed.RATE_LIMIT_MAX,
     ACCESS_TOKEN_SECRET: parsed.ACCESS_TOKEN_SECRET ?? 'local-development-access-token-secret-32',
+    WHISPER_TOKEN_PEPPER: parsed.WHISPER_TOKEN_PEPPER ?? 'local-development-whisper-pepper-32',
     corsOrigins,
     firebaseConfigured,
   };

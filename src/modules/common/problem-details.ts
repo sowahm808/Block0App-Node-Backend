@@ -50,7 +50,7 @@ export function problemDetails(error: Error, request: FastifyRequest) {
     traceId: request.id,
     correlationId: request.id,
     fieldErrors,
-    instance: request.url,
+    instance: request.url.replace(/(\/public\/whispers\/unwrap\/)[^/?]+/i, '$1[redacted]'),
     ...(app?.errors ? { errors: app.errors, validationErrors: app.errors } : {}),
     ...(validationErrors ? { errors: validationErrors, validationErrors } : {}),
   };

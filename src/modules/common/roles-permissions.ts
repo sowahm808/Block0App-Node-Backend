@@ -23,6 +23,8 @@ export const rolePermissions: Record<AppRole, string[]> = {
     'certificate.read',
     'notification.read',
     'profile.manage',
+    'whispers.create',
+    'whispers.read_own',
   ],
   Mentor: [
     'dashboard.read',
@@ -32,6 +34,8 @@ export const rolePermissions: Record<AppRole, string[]> = {
     'mentor.support.manage',
     'notification.read',
     'profile.manage',
+    'whispers.create',
+    'whispers.read_own',
   ],
   ContentReviewer: [
     'dashboard.read',
