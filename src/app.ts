@@ -45,6 +45,10 @@ import {
 } from './modules/system-settings/system-settings.schemas.js';
 import { MentorTeamsRepository } from './modules/mentor-teams/mentor-teams.repository.js';
 import { mentorTeamRoutes } from './modules/mentor-teams/mentor-teams.routes.js';
+import { WhispersRepository } from './modules/whispers/whispers.repository.js';
+import { WhisperWrapClient } from './modules/whispers/whisperwrap.client.js';
+import { WhispersService } from './modules/whispers/whispers.service.js';
+import { publicWhisperRoutes, whisperRoutes } from './modules/whispers/whispers.routes.js';
 
 export async function buildApp(overrides?: any) {
   const app = Fastify({
@@ -274,6 +278,53 @@ export async function buildApp(overrides?: any) {
           },
         }
       : new NotificationsRepository(getFirebase().db));
+  const whispers =
+    overrides?.whispers ??
+    (overrides
+      ? {
+          async list() {
+            return [];
+          },
+          async get() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async generate() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async content() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async regenerate() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async confirm() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async audioUpload() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async audioComplete() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async send() {
+            throw new Error('Whisper test service is not configured');
+          },
+          async unwrap() {
+            throw new Error('Whisper test service is not configured');
+          },
+        }
+      : new WhispersService(
+          new WhispersRepository(getFirebase().db),
+          new WhisperWrapClient(
+            env.WHISPERWRAP_BASE_URL,
+            env.WHISPERWRAP_API_KEY,
+            env.WHISPER_SEND_TIMEOUT_MS,
+          ),
+          env.WHISPER_TOKEN_PEPPER,
+          env.PUBLIC_APP_URL,
+          getFirebase().storage,
+          env.FIREBASE_STORAGE_BUCKET ?? env.WHISPER_AUDIO_BUCKET,
+        ));
 
   const settingsRepository =
     overrides?.settingsRepository ??
@@ -942,6 +993,8 @@ export async function buildApp(overrides?: any) {
       await v1.register(systemSettingsRoutes, { systemSettings, authService });
       await v1.register(cohortRoutes, { cohorts, authService } as any);
       await v1.register(mentorTeamRoutes, { mentorTeams, authService } as any);
+      await v1.register(whisperRoutes, { whispers, authService, users } as any);
+      await v1.register(publicWhisperRoutes, { prefix: '/public', whispers });
       if (imports) await v1.register(learningPackImportRoutes, { imports, authService } as any);
       await v1.register(notificationsRoutes, {
         prefix: '/notifications',
